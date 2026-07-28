@@ -3,23 +3,33 @@
 # sub_to_gist — 部署脚本
 #
 # 功能：检测环境 → 安装依赖 → 创建目录 → 部署脚本 → 设置权限 → 提示配置
+# 支持：本地安装（clone 仓库后执行）+ 网络一键安装（sh -c "$(curl ...)"）
 #
 # 用法：
-#   sh install.sh              # 交互式部署
+#   sh install.sh              # 交互式部署（本地或网络模式自动检测）
 #   sh install.sh --auto       # 静默部署（使用默认值）
+#   sh install.sh --help       # 显示帮助
+#
+# 一键安装：
+#   sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)"
 # =============================================================================
 
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.0"
+VERSION="1.0.1"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"
 CONFIG_TEMPLATE="config.example"
 DIRS_TO_CREATE="tasks.d cache.d state.d logs"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src"
+
+# 网络安装模式临时目录（用于 trap 清理）
+DEPLOY_TMP_DIR=""
 
 # 获取脚本所在目录（源文件目录）
+# 注意：sh -c "$(curl ...)" 模式下 $0 为 sh，SCRIPT_DIR 解析为当前目录，无源文件
 SCRIPT_DIR=$(dirname "$0")
 case "$SCRIPT_DIR" in
     /*) : ;;
@@ -35,6 +45,44 @@ detect_env() {
         echo "fnos"
     else
         echo "generic"
+    fi
+}
+
+# ============ 安装模式检测 ============
+
+# 检测安装模式：local（本地有源文件）/ remote（需从 GitHub 下载）
+detect_install_mode() {
+    if [ -f "$SCRIPT_DIR/$SCRIPT_NAME" ] && [ -f "$SCRIPT_DIR/$CONFIG_TEMPLATE" ]; then
+        echo "local"
+    else
+        echo "remote"
+    fi
+}
+
+# 下载文件（curl 兼容 OpenWrt BusyBox）
+# $1 = URL, $2 = 目标路径
+download_file() {
+    local url="$1"
+    local dst="$2"
+    echo_info "下载：$url"
+    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$url" -o "$dst" 2>/dev/null; then
+        if [ -s "$dst" ]; then
+            echo_ok "下载完成：$dst"
+            return 0
+        else
+            echo_error "下载内容为空：$url"
+            return 1
+        fi
+    else
+        echo_error "下载失败：$url"
+        return 1
+    fi
+}
+
+# 清理临时目录（trap 调用）
+cleanup_tmp() {
+    if [ -n "$DEPLOY_TMP_DIR" ] && [ -d "$DEPLOY_TMP_DIR" ]; then
+        rm -rf "$DEPLOY_TMP_DIR" 2>/dev/null
     fi
 }
 
@@ -130,23 +178,45 @@ create_dirs() {
 # ============ 文件部署 ============
 
 deploy_files() {
+    local install_mode
+    install_mode=$(detect_install_mode)
+
     local src_script="$SCRIPT_DIR/$SCRIPT_NAME"
     local src_config="$SCRIPT_DIR/$CONFIG_TEMPLATE"
     local dst_script="$INSTALL_DIR/$SCRIPT_NAME"
     local dst_config="$INSTALL_DIR/$CONFIG_NAME"
 
-    # 检查源文件
-    if [ ! -f "$src_script" ]; then
-        echo_error "源脚本不存在：$src_script"
-        return 1
-    fi
-    if [ ! -f "$src_config" ]; then
-        echo_error "源配置模板不存在：$src_config"
-        return 1
+    # 网络安装模式：从 GitHub raw 下载源文件到临时目录
+    if [ "$install_mode" = "remote" ]; then
+        echo_info "检测到网络安装模式，从 GitHub 下载源文件"
+        DEPLOY_TMP_DIR=$(mktemp -d 2>/dev/null || echo "/tmp/sub_to_gist_install.$$")
+        mkdir -p "$DEPLOY_TMP_DIR"
+        trap cleanup_tmp EXIT INT TERM
+
+        src_script="$DEPLOY_TMP_DIR/$SCRIPT_NAME"
+        src_config="$DEPLOY_TMP_DIR/$CONFIG_TEMPLATE"
+
+        if ! download_file "$GITHUB_RAW_BASE/$SCRIPT_NAME" "$src_script"; then
+            return 1
+        fi
+        if ! download_file "$GITHUB_RAW_BASE/$CONFIG_TEMPLATE" "$src_config"; then
+            return 1
+        fi
+    else
+        # 本地模式：检查源文件
+        if [ ! -f "$src_script" ]; then
+            echo_error "源脚本不存在：$src_script"
+            echo_error "若使用网络安装，请执行：sh -c \"\$(curl -sSL $GITHUB_RAW_BASE/install.sh)\""
+            return 1
+        fi
+        if [ ! -f "$src_config" ]; then
+            echo_error "源配置模板不存在：$src_config"
+            return 1
+        fi
     fi
 
     # 复制主脚本
-    echo_info "部署主脚本：$src_script → $dst_script"
+    echo_info "部署主脚本：→ $dst_script"
     cp "$src_script" "$dst_script"
     chmod 755 "$dst_script"
 
@@ -157,7 +227,7 @@ deploy_files() {
         cp "$dst_config" "$backup"
         chmod 600 "$backup"
     else
-        echo_info "部署配置模板：$src_config → $dst_config"
+        echo_info "部署配置模板：→ $dst_config"
         cp "$src_config" "$dst_config"
     fi
     chmod 600 "$dst_config"

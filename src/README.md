@@ -18,21 +18,33 @@
 
 ## 一、部署
 
-### 1.1 交互式部署（推荐）
+### 1.1 网络一键安装（推荐）
+
+无需 clone 仓库，直接在目标设备执行（OpenWrt / 飞牛OS / 通用 Linux 均可）：
 
 ```sh
+sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)"
+```
+
+> **注意**：URL 必须用双引号 `"` 包裹（不能用反引号 `` ` ``，否则会被 shell 解释为命令替换）。脚本会自动检测网络安装模式，从 GitHub 下载 pusher.sh 和 config.example 到临时目录后部署。
+
+### 1.2 本地部署（clone 仓库后）
+
+```sh
+git clone https://github.com/ciskonc/sub_to_gist.git
+cd sub_to_gist/src
 sh install.sh
 ```
 
 部署脚本会执行 5 个步骤：检查依赖 → 创建目录 → 部署脚本与配置 → 设置权限 → 验证部署。
 
-### 1.2 静默部署（使用默认值）
+### 1.3 静默部署（使用默认值）
 
 ```sh
 sh install.sh --auto
 ```
 
-### 1.3 部署结果
+### 1.4 部署结果
 
 | 路径 | 权限 | 说明 |
 |------|------|------|

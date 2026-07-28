@@ -56,6 +56,9 @@
 sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)"
 ```
 
+
+> **注意**：URL 必须用双引号 `"` 包裹，**不能**用反引号 `` ` ``（否则 shell 会将其解释为命令替换，导致脚本内容被当作命令执行）。
+
 或手动部署：
 
 ```sh
