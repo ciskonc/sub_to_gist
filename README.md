@@ -100,7 +100,7 @@ vi /etc/sub_to_gist/config.conf
 ```
 
 ```
-=== Gist 内容推送器 v1.0.4 ===
+=== Gist 内容推送器 v1.0.5 ===
 运行环境：openwrt
 Token 状态：已配置
 当前已有 2 个推送任务

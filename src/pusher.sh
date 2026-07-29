@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.4"
+VERSION="1.0.5"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -241,6 +241,42 @@ parse_gist_id() {
     return 1
 }
 
+# 从任务名称自动生成任务 ID
+# 规则：转小写 → 非 [a-z0-9_] 替换为 _ → 去首尾下划线 → 截断 32 字符
+# 如果结果为空或以数字开头，用 task_N 序号
+# 如果 ID 已存在，追加 _N 序号
+generate_task_id() {
+    local name="$1"
+    local id
+    # 转小写 + 非 a-z0-9_ 替换为 _
+    id=$(printf '%s' "$name" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_' '_')
+    # 去除首尾下划线
+    while [ "${id#_}" != "$id" ]; do id="${id#_}"; done
+    while [ "${id%_}" != "$id" ]; do id="${id%_}"; done
+    # 截断到 32 字符
+    id=$(printf '%s' "$id" | cut -c1-32)
+    # 如果为空或以数字开头，用 task_N 序号
+    case "$id" in
+        ''|[0-9]*)
+            local n=1
+            while [ -f "$TASKS_DIR/task_${n}.conf" ]; do
+                n=$((n + 1))
+            done
+            id="task_${n}"
+            ;;
+        *)
+            # 如果 ID 已存在，追加序号
+            local base="$id"
+            local n=2
+            while [ -f "$TASKS_DIR/${id}.conf" ]; do
+                id="${base}_${n}"
+                n=$((n + 1))
+            done
+            ;;
+    esac
+    printf '%s' "$id"
+}
+
 # 保存配置文件（原子写）：save_conf <file> <key1> <val1> <key2> <val2> ...
 save_conf() {
     local file="$1"
@@ -298,17 +334,17 @@ set_state() {
 acquire_lock() {
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo $$ > "$LOCK_DIR/pid"
-        trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+        trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
         return 0
     else
         local pid
         pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
         if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
             # 旧进程已死亡，清理并重试
-            rmdir "$LOCK_DIR" 2>/dev/null
+            rm -rf "$LOCK_DIR" 2>/dev/null
             if mkdir "$LOCK_DIR" 2>/dev/null; then
                 echo $$ > "$LOCK_DIR/pid"
-                trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+                trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
                 return 0
             fi
         fi
@@ -318,7 +354,7 @@ acquire_lock() {
 }
 
 release_lock() {
-    rmdir "$LOCK_DIR" 2>/dev/null
+    rm -rf "$LOCK_DIR" 2>/dev/null
     trap - EXIT INT TERM
 }
 
@@ -975,14 +1011,18 @@ action_add_task() {
 
     local task_id task_name task_url task_ua task_headers
 
-    printf '请输入任务 ID（小写字母/数字/下划线，以字母开头，≤32 字符）：'
-    if ! read -r task_id; then
+    printf '请输入任务名称：'
+    if ! read -r task_name; then
         echo "输入取消"
         return 1
     fi
-    if ! validate_task_id "$task_id"; then
+    if [ -z "$task_name" ]; then
+        echo "任务名称不能为空"
         return 1
     fi
+
+    # 从任务名称自动生成任务 ID
+    task_id=$(generate_task_id "$task_name")
     if [ -f "$TASKS_DIR/${task_id}.conf" ]; then
         printf '任务 ID 已存在：%s，是否覆盖？[y/N] ' "$task_id"
         local confirm
@@ -992,13 +1032,7 @@ action_add_task() {
             *) echo "已取消"; return 1 ;;
         esac
     fi
-
-    printf '请输入任务显示名称：'
-    if ! read -r task_name; then
-        echo "输入取消"
-        return 1
-    fi
-    [ -z "$task_name" ] && task_name="$task_id"
+    echo "自动生成任务 ID：$task_id"
 
     printf '请输入源 URL（必须以 https:// 开头）：'
     if ! read -r task_url; then
