@@ -100,8 +100,9 @@ vi /etc/sub_to_gist/config.conf
 ```
 
 ```
-=== Gist 订阅推送器 v1.0.0 ===
+=== Gist 订阅推送器 v1.0.2 ===
 运行环境：openwrt
+Token 状态：已配置
 当前已有 2 个推送任务
 
   1) 添加订阅推送到 Gist
@@ -110,6 +111,8 @@ vi /etc/sub_to_gist/config.conf
   4) 立即运行所有任务
   5) 安装/管理 cron 定时
   6) 卸载本工具和清理 cron
+  7) 配置 Gist Token
+  8) 检查更新
   0) 退出
 请选择 [0-6]:
 ```

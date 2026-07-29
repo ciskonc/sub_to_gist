@@ -63,7 +63,14 @@ sh install.sh --auto
 
 ### 2.1 全局配置 `/etc/sub_to_gist/config.conf`
 
-部署后必须编辑此文件，填入 GitHub Personal Access Token：
+**推荐方式**：启动菜单后选择「7) 配置 Gist Token」，脚本会交互式引导输入并自动验证有效性。
+
+```sh
+/etc/sub_to_gist/pusher.sh
+# 选择 7) 配置 Gist Token
+```
+
+**手动方式**（也可直接编辑文件）：
 
 ```sh
 vi /etc/sub_to_gist/config.conf
@@ -79,6 +86,8 @@ vi /etc/sub_to_gist/config.conf
 PAT 生成地址：https://github.com/settings/tokens
 
 > ⚠ 配置文件格式强制为 `KEY="VALUE"` 单行赋值，禁止使用 `source` 加载（命令注入防护）。
+>
+> ℹ 关于「单 token + 多 gist」设计：所有任务共用同一个 GitHub 账号的 PAT，但每个任务推送到独立的 Gist 文件（通过 `TASK_GIST_ID` 区分）。如需使用不同 GitHub 账号，请创建多个 sub_to_gist 实例（不同 `INSTALL_DIR`）。
 
 ### 2.2 任务配置 `tasks.d/{task_id}.conf`
 
@@ -110,8 +119,9 @@ PAT 生成地址：https://github.com/settings/tokens
 ### 菜单选项
 
 ```
-=== Gist 订阅推送器 v1.0.0 ===
+=== Gist 订阅推送器 v1.0.2 ===
 运行环境：openwrt
+Token 状态：已配置 / 未配置
 当前已有 N 个推送任务
 
   1) 添加订阅推送到 Gist
@@ -120,8 +130,10 @@ PAT 生成地址：https://github.com/settings/tokens
   4) 立即运行所有任务
   5) 安装/管理 cron 定时
   6) 卸载本工具和清理 cron
+  7) 配置 Gist Token
+  8) 检查更新
   0) 退出
-请选择 [0-6]:
+请选择 [0-8]:
 ```
 
 | 选项 | 功能 |
@@ -132,6 +144,38 @@ PAT 生成地址：https://github.com/settings/tokens
 | 4 | 立即按顺序运行所有任务（与 `run-all` 命令等价） |
 | 5 | 进入 cron 子菜单：安装 / 自定义时间 / 卸载 |
 | 6 | 卸载本工具：清理 cron → 删除 `/etc/sub_to_gist/` 目录（不删除已创建的 Gist） |
+| 7 | 配置 Gist Token：交互式输入 PAT → 验证有效性 → 保存到 config.conf（无需手动 vi） |
+| 8 | 检查更新：从 GitHub 获取远程版本号 → 与本地版本对比 → 有更新则自主更新（备份旧版本→覆盖→提示回滚命令） |
+
+> **首次使用流程**：启动菜单 → 7) 配置 Gist Token → 1) 添加订阅推送任务 → 5) 安装 cron 定时
+
+### 自主更新机制（v1.0.2 新增）
+
+脚本内置版本检测和自主更新功能，支持两种触发方式：
+
+**方式一：菜单触发**（推荐）
+
+启动 pusher.sh → 选择「8) 检查更新」
+
+**方式二：命令行触发**
+
+```sh
+# 如果本地有 install.sh
+sh /etc/sub_to_gist/install.sh --upgrade
+
+# 如果本地没有 install.sh（从 GitHub 下载临时副本执行）
+sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)" -- --upgrade
+```
+
+**更新流程**：
+1. 读取本地版本号（从 `pusher.sh` 的 `VERSION` 字段）
+2. 从 GitHub raw 下载远程 `pusher.sh`，提取版本号
+3. 语义化版本对比（major.minor.patch）
+4. 本地 = 远程 → 提示"已是最新版本"，不下载
+5. 本地 > 远程 → 提示"本地版本更新"，跳过
+6. 本地 < 远程 → 备份当前版本（`pusher.sh.bak.YYYYMMDDHHMMSS`）→ 覆盖更新 → 提示回滚命令
+
+> 重复运行 install.sh 时，如果本地版本已是最新的，不会重复下载和覆盖文件。
 
 ### cron 子菜单（选项 5）
 

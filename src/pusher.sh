@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.0"
+VERSION="1.0.2"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1208,6 +1208,122 @@ action_uninstall() {
     return 0
 }
 
+# ============ 配置 Gist Token ============
+
+action_configure_token() {
+    echo ""
+    echo "=== 配置 Gist Token ==="
+    echo ""
+
+    # 显示当前 token（脱敏）
+    local current_token=""
+    local desc_prefix="sub_to_gist"
+    if load_conf "$CONFIG_FILE" 2>/dev/null; then
+        current_token="${GIST_TOKEN:-}"
+        desc_prefix="${GIST_DESCRIPTION_PREFIX:-sub_to_gist}"
+    fi
+
+    if [ -n "$current_token" ]; then
+        # 脱敏显示：前 4 位 + *** + 后 4 位
+        local token_len=${#current_token}
+        if [ "$token_len" -gt 12 ]; then
+            local prefix="${current_token%${current_token#????}}"
+            local suffix="${current_token##${current_token%????}}"
+            echo "当前 Token：${prefix}***${suffix}（长度 ${token_len}）"
+        else
+            echo "当前 Token：***（长度 ${token_len}，过短）"
+        fi
+    else
+        echo "当前 Token：（未配置）"
+    fi
+    echo "  GIST_DESCRIPTION_PREFIX：${desc_prefix}"
+    echo ""
+
+    # 提示输入新 token
+    printf '请输入 GitHub Personal Access Token（留空取消）：'
+    local new_token
+    if ! read -r new_token; then
+        echo "输入取消"
+        return 1
+    fi
+
+    if [ -z "$new_token" ]; then
+        echo "已取消"
+        return 1
+    fi
+
+    # 验证 token 格式（ghp_ classic PAT 或 github_pat_ fine-grained PAT）
+    case "$new_token" in
+        ghp_*|github_pat_*) ;;
+        *)
+            printf 'Token 格式异常（应以 ghp_ 或 github_pat_ 开头），确认继续？[y/N] '
+            local confirm_format
+            read -r confirm_format
+            case "$confirm_format" in
+                y|Y) ;;
+                *) echo "已取消"; return 1 ;;
+            esac
+            ;;
+    esac
+
+    # 验证 token 有效性
+    echo "正在验证 Token 有效性（调用 GitHub API）..."
+    if ! gist_check_token "$new_token"; then
+        echo "Token 验证失败，未保存"
+        return 1
+    fi
+    echo "[OK] Token 验证通过"
+
+    # 保存到 config.conf（保留 GIST_DESCRIPTION_PREFIX）
+    save_conf "$CONFIG_FILE" \
+        GIST_TOKEN "$new_token" \
+        GIST_DESCRIPTION_PREFIX "$desc_prefix"
+    chmod 600 "$CONFIG_FILE" 2>/dev/null
+
+    echo ""
+    echo "Token 已保存到：$CONFIG_FILE"
+    echo "  GIST_TOKEN：已更新"
+    echo "  GIST_DESCRIPTION_PREFIX：$desc_prefix"
+    echo "  文件权限：600"
+    echo ""
+    echo "提示：现在可以选择「1) 添加订阅推送到 Gist」创建任务"
+    echo ""
+}
+
+# ============ 检查更新 ============
+
+# 调用 install.sh --upgrade 检查并自主更新
+action_check_update() {
+    echo ""
+    echo "=== 检查更新 ==="
+    echo ""
+
+    local install_script="$INSTALL_DIR/install.sh"
+
+    # install.sh 不在 INSTALL_DIR 时，从 GitHub raw 下载到临时文件执行
+    if [ ! -f "$install_script" ]; then
+        echo "本地未找到 install.sh，从 GitHub 下载临时副本..."
+        local tmp_script
+        tmp_script=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_install.$$")
+        if ! curl -sSL --fail --connect-timeout 10 --max-time 60 \
+            "https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh" \
+            -o "$tmp_script" 2>/dev/null || [ ! -s "$tmp_script" ]; then
+            echo "[ERROR] 下载 install.sh 失败（网络错误或 GitHub 不可达）"
+            rm -f "$tmp_script" 2>/dev/null
+            return 1
+        fi
+        chmod 755 "$tmp_script"
+        sh "$tmp_script" --upgrade
+        local rc=$?
+        rm -f "$tmp_script" 2>/dev/null
+        return $rc
+    fi
+
+    # 本地有 install.sh，直接调用
+    sh "$install_script" --upgrade
+    return $?
+}
+
 # 主菜单
 main_menu() {
     # 检查依赖
@@ -1221,11 +1337,18 @@ main_menu() {
         esac
     fi
 
-    # 检查全局配置
+    # 检查全局配置：config.conf 不存在时自动创建空配置，引导用户选择 7) 配置 Token
     if [ ! -f "$CONFIG_FILE" ]; then
-        echo "全局配置文件不存在：$CONFIG_FILE"
-        echo "请先运行 install.sh 或手动创建配置文件。"
-        return 1
+        echo "全局配置文件不存在，正在创建空配置：$CONFIG_FILE"
+        mkdir -p "$(dirname "$CONFIG_FILE")" 2>/dev/null
+        save_conf "$CONFIG_FILE" \
+            GIST_TOKEN "" \
+            GIST_DESCRIPTION_PREFIX "sub_to_gist"
+        chmod 600 "$CONFIG_FILE" 2>/dev/null
+        echo "[OK] 配置文件已创建（权限 600）"
+        echo ""
+        echo "请选择「7) 配置 Gist Token」填入 GitHub PAT 后再添加任务"
+        echo ""
     fi
 
     while :; do
@@ -1234,9 +1357,16 @@ main_menu() {
             task_count=$(ls "$TASKS_DIR"/*.conf 2>/dev/null | wc -l)
         fi
 
+        # 检查 token 配置状态（用于菜单提示）
+        local token_status="未配置"
+        if load_conf "$CONFIG_FILE" 2>/dev/null && [ -n "${GIST_TOKEN:-}" ]; then
+            token_status="已配置"
+        fi
+
         echo ""
         echo "=== Gist 订阅推送器 v$VERSION ==="
         echo "运行环境：$(detect_env)"
+        echo "Token 状态：$token_status"
         echo "当前已有 ${task_count} 个推送任务"
         echo ""
         echo "  1) 添加订阅推送到 Gist"
@@ -1245,8 +1375,10 @@ main_menu() {
         echo "  4) 立即运行所有任务"
         echo "  5) 安装/管理 cron 定时"
         echo "  6) 卸载本工具和清理 cron"
+        echo "  7) 配置 Gist Token"
+        echo "  8) 检查更新"
         echo "  0) 退出"
-        printf '请选择 [0-6]: '
+        printf '请选择 [0-8]: '
 
         local choice
         if ! read -r choice; then
@@ -1262,6 +1394,8 @@ main_menu() {
             4) action_run_all ;;
             5) action_manage_cron ;;
             6) action_uninstall ;;
+            7) action_configure_token ;;
+            8) action_check_update ;;
             0) echo "再见"; exit 0 ;;
             '') echo "输入不能为空" ;;
             *) echo "无效选项：'$choice'" ;;

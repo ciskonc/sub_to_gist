@@ -4,20 +4,26 @@
 #
 # 功能：检测环境 → 安装依赖 → 创建目录 → 部署脚本 → 设置权限 → 提示配置
 # 支持：本地安装（clone 仓库后执行）+ 网络一键安装（sh -c "$(curl ...)"）
+# 支持：版本检测 + 自主更新（--upgrade）
 #
 # 用法：
 #   sh install.sh              # 交互式部署（本地或网络模式自动检测）
 #   sh install.sh --auto       # 静默部署（使用默认值）
+#   sh install.sh --upgrade    # 检查远程版本，有更新则自主更新
 #   sh install.sh --help       # 显示帮助
 #
 # 一键安装：
 #   sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)"
+#
+# 自主更新：
+#   sh /etc/sub_to_gist/pusher.sh  # 菜单选择 8) 检查更新
+#   sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh)" -- --upgrade
 # =============================================================================
 
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.1"
+VERSION="1.0.2"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"
@@ -84,6 +90,67 @@ cleanup_tmp() {
     if [ -n "$DEPLOY_TMP_DIR" ] && [ -d "$DEPLOY_TMP_DIR" ]; then
         rm -rf "$DEPLOY_TMP_DIR" 2>/dev/null
     fi
+}
+
+# ============ 版本检测 ============
+
+# 从已安装的 pusher.sh 提取版本号
+get_local_version() {
+    local installed_script="$INSTALL_DIR/$SCRIPT_NAME"
+    if [ -f "$installed_script" ]; then
+        grep '^VERSION="' "$installed_script" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//'
+    fi
+}
+
+# 从文件提取版本号（通用，供 deploy_files 复用）
+# $1 = 文件路径
+extract_version() {
+    if [ -f "$1" ]; then
+        grep '^VERSION="' "$1" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//'
+    fi
+}
+
+# 从 GitHub raw 下载 pusher.sh 到临时文件并返回版本号
+# $1 = 临时文件路径（下载完成后可用于覆盖更新）
+# 输出：版本号字符串（失败时输出空字符串）
+get_remote_version() {
+    local tmp_file="$1"
+    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$GITHUB_RAW_BASE/$SCRIPT_NAME" -o "$tmp_file" 2>/dev/null; then
+        if [ -s "$tmp_file" ]; then
+            extract_version "$tmp_file"
+        fi
+    fi
+}
+
+# 比较两个语义化版本号（格式：major.minor.patch）
+# 参数：$1=v1  $2=v2
+# 返回值：0=相等  1=v1>v2  2=v1<v2
+compare_versions() {
+    local v1="$1" v2="$2"
+    # 移除可能的 v 前缀
+    v1=${v1#v}
+    v2=${v2#v}
+
+    while [ -n "$v1" ] || [ -n "$v2" ]; do
+        # 提取第一段（. 之前）
+        local p1=${v1%%.*}
+        local p2=${v2%%.*}
+        # 处理空值
+        p1=${p1:-0}
+        p2=${p2:-0}
+
+        # 数值比较
+        if [ "$p1" -gt "$p2" ] 2>/dev/null; then
+            return 1
+        elif [ "$p1" -lt "$p2" ] 2>/dev/null; then
+            return 2
+        fi
+
+        # 移除已比较的部分
+        case "$v1" in *.*) v1=${v1#*.} ;; *) v1="" ;; esac
+        case "$v2" in *.*) v2=${v2#*.} ;; *) v2="" ;; esac
+    done
+    return 0
 }
 
 # ============ 颜色输出 ============
@@ -215,17 +282,47 @@ deploy_files() {
         fi
     fi
 
-    # 复制主脚本
-    echo_info "部署主脚本：→ $dst_script"
-    cp "$src_script" "$dst_script"
-    chmod 755 "$dst_script"
+    # 版本检测：如果本地已安装，对比版本决定是否更新主脚本
+    local local_version=""
+    local remote_version=""
+    local skip_script=0
 
-    # 复制配置文件（如果目标已存在则备份）
+    if [ -f "$dst_script" ]; then
+        local_version=$(extract_version "$dst_script")
+        remote_version=$(extract_version "$src_script")
+
+        if [ -n "$local_version" ] && [ -n "$remote_version" ]; then
+            compare_versions "$remote_version" "$local_version"
+            case $? in
+                0)
+                    echo_info "本地版本 v$local_version 已是最新，跳过主脚本更新"
+                    skip_script=1
+                    ;;
+                2)
+                    echo_warn "本地版本 v$local_version 比源版本 v$remote_version 更新，跳过主脚本更新"
+                    skip_script=1
+                    ;;
+                1)
+                    echo_info "发现新版本：v$local_version → v$remote_version，更新主脚本"
+                    local backup="${dst_script}.bak.$(date '+%Y%m%d%H%M%S')"
+                    cp "$dst_script" "$backup"
+                    chmod 600 "$backup"
+                    echo_info "已备份旧版本：$backup"
+                    ;;
+            esac
+        fi
+    fi
+
+    # 复制主脚本（skip_script=0 时执行）
+    if [ "$skip_script" -eq 0 ]; then
+        echo_info "部署主脚本：→ $dst_script"
+        cp "$src_script" "$dst_script"
+        chmod 755 "$dst_script"
+    fi
+
+    # 复制配置文件（用户配置不覆盖，仅首次部署时写入）
     if [ -f "$dst_config" ]; then
-        local backup="${dst_config}.bak.$(date '+%Y%m%d%H%M%S')"
-        echo_warn "配置文件已存在，备份至：$backup"
-        cp "$dst_config" "$backup"
-        chmod 600 "$backup"
+        echo_info "配置文件已存在，保留用户配置：$dst_config"
     else
         echo_info "部署配置模板：→ $dst_config"
         cp "$src_config" "$dst_config"
@@ -281,6 +378,95 @@ verify_deployment() {
     return 0
 }
 
+# ============ 自主更新 ============
+
+# 检查远程版本并自主更新
+do_upgrade() {
+    echo "============================================================"
+    echo "  sub_to_gist 自主更新检查"
+    echo "============================================================"
+    echo ""
+
+    local local_version
+    local_version=$(get_local_version)
+
+    if [ -z "$local_version" ]; then
+        echo_warn "本地未安装 sub_to_gist（$INSTALL_DIR/$SCRIPT_NAME 不存在）"
+        echo_info "请先执行安装：sh install.sh"
+        return 1
+    fi
+
+    echo_info "本地版本：v$local_version"
+    echo_info "正在检查远程版本（$GITHUB_RAW_BASE）..."
+
+    local tmp_file
+    tmp_file=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_upgrade.$$")
+
+    local remote_version
+    remote_version=$(get_remote_version "$tmp_file")
+
+    if [ -z "$remote_version" ]; then
+        echo_error "无法获取远程版本（网络错误或 GitHub 不可达）"
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    echo_info "远程版本：v$remote_version"
+
+    # 版本对比
+    compare_versions "$remote_version" "$local_version"
+    local cmp_result=$?
+
+    case $cmp_result in
+        0)
+            echo_ok "已是最新版本（v$local_version），无需更新"
+            rm -f "$tmp_file" 2>/dev/null
+            return 0
+            ;;
+        2)
+            echo_warn "本地版本更新（v$local_version > v$remote_version），跳过更新"
+            rm -f "$tmp_file" 2>/dev/null
+            return 0
+            ;;
+        1)
+            echo_info "发现新版本：v$local_version → v$remote_version"
+            ;;
+    esac
+
+    # 执行更新：备份 → 覆盖
+    echo_info "备份当前版本..."
+    local backup_file="$INSTALL_DIR/${SCRIPT_NAME}.bak.$(date '+%Y%m%d%H%M%S')"
+    cp "$INSTALL_DIR/$SCRIPT_NAME" "$backup_file"
+    chmod 600 "$backup_file"
+    echo_ok "已备份至：$backup_file"
+
+    echo_info "更新主脚本..."
+    cp "$tmp_file" "$INSTALL_DIR/$SCRIPT_NAME"
+    chmod 755 "$INSTALL_DIR/$SCRIPT_NAME"
+    rm -f "$tmp_file" 2>/dev/null
+    echo_ok "主脚本已更新至 v$remote_version"
+
+    # 同步更新 config.example（仅当本地无 config.conf 时）
+    if [ ! -f "$INSTALL_DIR/$CONFIG_NAME" ]; then
+        local tmp_config
+        tmp_config=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_config.$$")
+        if curl -sSL --fail --connect-timeout 10 --max-time 30 "$GITHUB_RAW_BASE/$CONFIG_TEMPLATE" -o "$tmp_config" 2>/dev/null && [ -s "$tmp_config" ]; then
+            cp "$tmp_config" "$INSTALL_DIR/$CONFIG_NAME"
+            chmod 600 "$INSTALL_DIR/$CONFIG_NAME"
+            echo_ok "配置模板已更新"
+        fi
+        rm -f "$tmp_config" 2>/dev/null
+    else
+        echo_info "配置文件已存在，保留用户配置"
+    fi
+
+    echo ""
+    echo_ok "更新完成：v$local_version → v$remote_version"
+    echo_info "备份文件：$backup_file"
+    echo_info "如需回滚：cp $backup_file $INSTALL_DIR/$SCRIPT_NAME"
+    return 0
+}
+
 # ============ 完成提示 ============
 
 print_completion() {
@@ -333,6 +519,10 @@ main() {
     local auto_mode=0
     case "${1:-}" in
         --auto|-a) auto_mode=1 ;;
+        --upgrade|-u)
+            do_upgrade
+            exit $?
+            ;;
         --help|-h)
             cat <<EOF
 sub_to_gist 部署脚本 v$VERSION
@@ -340,6 +530,7 @@ sub_to_gist 部署脚本 v$VERSION
 用法：
   sh install.sh              交互式部署
   sh install.sh --auto       静默部署（使用默认值）
+  sh install.sh --upgrade    检查远程版本，有更新则自主更新
   sh install.sh --help       显示帮助
 EOF
             exit 0
