@@ -1,7 +1,7 @@
 #!/bin/sh
 # =============================================================================
-# sub_to_gist — 订阅地址中转推送器
-# 读取机场订阅内容，原样透传推送到 GitHub Gist，作为订阅转换服务的中转入口
+# sub_to_gist — 网页内容中转推送器
+# 读取远程网页内容，原样推送到 GitHub Gist，作为下游内容处理服务的数据源
 #
 # 兼容环境：OpenWrt (BusyBox ash) / 飞牛OS fnOS (bash) / 通用 Linux (bash/dash)
 # 适配策略：运行时自适应（detect_env 检测环境，选择 cron 路径/包管理器/重载命令）
@@ -497,9 +497,9 @@ gist_delete() {
     echo "$http_code"
 }
 
-# ============ 订阅拉取 ============
+# ============ 内容拉取 ============
 
-# 拉取订阅内容到指定文件
+# 拉取网页内容到指定文件
 # $1 = url, $2 = ua, $3 = headers, $4 = output_file
 # 返回：0 成功 / 1 失败
 fetch_subscription() {
@@ -512,10 +512,10 @@ fetch_subscription() {
     case "$url" in
         https://*) ;;
         http://*)
-            log "WARN" "订阅 URL 使用不安全的 HTTP 协议：$url"
+            log "WARN" "源 URL 使用不安全的 HTTP 协议：$url"
             ;;
         *)
-            log "ERROR" "订阅 URL 必须以 http:// 或 https:// 开头"
+            log "ERROR" "源 URL 必须以 http:// 或 https:// 开头"
             return 1
             ;;
     esac
@@ -543,7 +543,7 @@ fetch_subscription() {
 
     local rc=$?
     if [ $rc -ne 0 ]; then
-        log "ERROR" "拉取订阅失败（curl 返回码 $rc）"
+        log "ERROR" "拉取内容失败（curl 返回码 $rc）"
         return 1
     fi
 
@@ -551,9 +551,9 @@ fetch_subscription() {
     local size
     size=$(wc -c < "$output_file" 2>/dev/null || echo 0)
     if [ "$size" -gt 1048576 ]; then
-        log "WARN" "订阅内容超过 1MB（$size 字节），Gist API 可能截断"
+        log "WARN" "源内容超过 1MB（$size 字节），Gist API 可能截断"
     elif [ "$size" -eq 0 ]; then
-        log "ERROR" "订阅内容为空"
+        log "ERROR" "源内容为空"
         return 1
     fi
 
@@ -609,9 +609,9 @@ push_task() {
 
     log "INFO" "开始处理任务：$task_id（$TASK_NAME）"
 
-    # 1. 拉取订阅内容
+    # 1. 拉取源内容
     if ! fetch_subscription "$TASK_URL" "$TASK_UA" "$TASK_HEADERS" "$tmp_file"; then
-        log "ERROR" "任务 $task_id 拉取订阅失败"
+        log "ERROR" "任务 $task_id 拉取内容失败"
         rm -f "$tmp_file"
 
         # 更新失败计数
@@ -649,7 +649,7 @@ push_task() {
         return 1
     fi
 
-    log "INFO" "任务 $task_id 拉取订阅成功"
+    log "INFO" "任务 $task_id 拉取内容成功"
 
     # 2. 推送到 gist
     local desc="[OK] ${TASK_NAME} ${now}"
@@ -950,7 +950,7 @@ action_list_tasks() {
 # 添加任务
 action_add_task() {
     echo ""
-    echo "=== 添加订阅推送任务 ==="
+    echo "=== 添加内容推送任务 ==="
     echo ""
 
     local task_id task_name task_url task_ua task_headers
@@ -980,7 +980,7 @@ action_add_task() {
     fi
     [ -z "$task_name" ] && task_name="$task_id"
 
-    printf '请输入订阅 URL（必须以 https:// 开头）：'
+    printf '请输入源 URL（必须以 https:// 开头）：'
     if ! read -r task_url; then
         echo "输入取消"
         return 1
@@ -1023,7 +1023,7 @@ action_add_task() {
     echo "任务已添加："
     echo "  任务 ID：$task_id"
     echo "  任务名称：$task_name"
-    echo "  订阅 URL：$task_url"
+    echo "  源 URL：$task_url"
     echo "  User-Agent：${task_ua:-（默认）}"
     echo "  额外请求头：${task_headers:-（无）}"
     echo "  Gist 文件名：$gist_filename"
@@ -1286,7 +1286,7 @@ action_configure_token() {
     echo "  GIST_DESCRIPTION_PREFIX：$desc_prefix"
     echo "  文件权限：600"
     echo ""
-    echo "提示：现在可以选择「1) 添加订阅推送到 Gist」创建任务"
+    echo "提示：现在可以选择「1) 添加内容推送到 Gist」创建任务"
     echo ""
 }
 
@@ -1364,12 +1364,12 @@ main_menu() {
         fi
 
         echo ""
-        echo "=== Gist 订阅推送器 v$VERSION ==="
+        echo "=== Gist 内容推送器 v$VERSION ==="
         echo "运行环境：$(detect_env)"
         echo "Token 状态：$token_status"
         echo "当前已有 ${task_count} 个推送任务"
         echo ""
-        echo "  1) 添加订阅推送到 Gist"
+        echo "  1) 添加内容推送到 Gist"
         echo "  2) 查看现在已有推送"
         echo "  3) 删除任务"
         echo "  4) 立即运行所有任务"
@@ -1494,7 +1494,7 @@ case "${1:-menu}" in
         ;;
     help|-h|--help)
         cat <<EOF
-sub_to_gist v$VERSION — 订阅地址中转推送器
+sub_to_gist v$VERSION — 网页内容中转推送器
 
 用法：
   $0                          启动交互菜单

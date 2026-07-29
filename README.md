@@ -1,6 +1,6 @@
 # sub_to_gist
 
-> 订阅地址中转推送器 — 读取机场订阅内容，原样透传推送到 GitHub Gist，作为订阅转换服务的中转入口。
+> 网页内容中转推送器 — 读取远程网页内容，原样推送到 GitHub Gist，作为下游内容处理服务的数据源。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Shell: POSIX sh](https://img.shields.io/badge/Shell-POSIX%20sh-blue.svg)](https://en.wikipedia.org/wiki/POSIX)
@@ -10,12 +10,12 @@
 
 ## 项目背景
 
-订阅转换服务（如 [sublink-worker](https://github.com/Toperlock/sublink-worker)）部署在 Cloudflare Workers / Vercel 等边缘平台时，常常**无法直接访问机场订阅地址**（被机场防火墙拦截或 IP被封）。
+下游内容处理服务部署在 Cloudflare Workers / Vercel 等边缘平台时，常常**无法直接访问源站点 URL**（被源站点防火墙拦截或 IP被封）。
 
-`sub_to_gist` 解决这个问题：在能访问机场的设备上（OpenWrt 路由器 / 飞牛OS NAS / 任意 Linux）定时拉取订阅内容，原样推送到 GitHub Gist，订阅转换服务再从 Gist raw URL 拉取，绕过访问限制。
+`sub_to_gist` 解决这个问题：在能访问源站点的设备上（OpenWrt 路由器 / 飞牛OS NAS / 任意 Linux）定时拉取网页内容，原样推送到 GitHub Gist，下游服务再从 Gist raw URL 拉取，绕过访问限制。
 
 ```
-机场订阅服务器  ──HTTPS──▶  sub_to_gist (你的设备)  ──HTTPS──▶  GitHub Gist  ──HTTPS──▶  订阅转换服务
+源站点  ──HTTPS──▶  sub_to_gist (你的设备)  ──HTTPS──▶  GitHub Gist  ──HTTPS──▶  下游内容处理服务
                               自定义 UA + 请求头         Bearer PAT              raw URL
 ```
 
@@ -24,11 +24,11 @@
 ## 功能特性
 
 - **多环境自适应**：OpenWrt（BusyBox ash）/ 飞牛OS fnOS（bash）/ 通用 Linux（dash），运行时自动检测
-- **多订阅源管理**：每个订阅源一个独立任务配置，CLI 表格化查看状态
+- **多源内容管理**：每个内容源一个独立任务配置，CLI 表格化查看状态
 - **交互式菜单**：添加 / 查看 / 删除 / 运行 / cron 管理 / 卸载，6 个选项一键操作
 - **定时推送**：cron 定时执行，BEGIN/END 标记原子块，幂等安装/卸载
 - **失败降级**：永不修改 gist 文件内容，仅更新 gist description 反映状态（OK / FAIL xN / CRITICAL）
-- **自定义 UA**：每个任务可设置独立 User-Agent 和额外请求头，绕过机场 UA 检测
+- **自定义 UA**：每个任务可设置独立 User-Agent 和额外请求头，绕过源站点 UA 检测
 - **安全加固**：禁止 source 配置 / mkdir 原子锁 / curl --config - stdin 注入敏感参数 / 日志自动脱敏
 - **sysupgrade 保留**：部署到 `/etc/sub_to_gist/`，OpenWrt 固件升级后配置与 state 不丢失
 - **POSIX sh 兼容**：禁用 bash 专有语法，一份脚本处处运行
@@ -100,12 +100,12 @@ vi /etc/sub_to_gist/config.conf
 ```
 
 ```
-=== Gist 订阅推送器 v1.0.2 ===
+=== Gist 内容推送器 v1.0.2 ===
 运行环境：openwrt
 Token 状态：已配置
 当前已有 2 个推送任务
 
-  1) 添加订阅推送到 Gist
+  1) 添加内容推送到 Gist
   2) 查看现在已有推送
   3) 删除任务
   4) 立即运行所有任务
@@ -124,8 +124,8 @@ Token 状态：已配置
 ```
 任务ID          任务名称              上次结果    连续失败     Gist URL
 -----------------------------------------------------------------------------------------
-airport_a       机场A                 ✓ OK       0            https://gist.githubusercontent.com/abc.../raw/airport_a.txt
-vpn_proxy       代理B                 ✗ FAIL     3            https://gist.githubusercontent.com/def.../raw/vpn_proxy.txt
+source_a       源站点A                 ✓ OK       0            https://gist.githubusercontent.com/abc.../raw/source_a.txt
+proxy_task       代理B                 ✗ FAIL     3            https://gist.githubusercontent.com/def.../raw/proxy_task.txt
 ```
 
 ### 命令行用法
@@ -161,7 +161,7 @@ pusher.sh help                     # 显示帮助
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `TASK_NAME` | ✅ | 任务显示名称 |
-| `TASK_URL` | ✅ | 订阅地址（必须 `https://` 开头） |
+| `TASK_URL` | ✅ | 源 URL（必须 `https://` 开头） |
 | `TASK_UA` | 否 | 自定义 User-Agent（留空使用 curl 默认 UA） |
 | `TASK_HEADERS` | 否 | 额外请求头，格式 `Key: Value\|Key2: Value2` |
 | `TASK_GIST_ID` | 自动 | 首次推送后自动填入，勿手动修改 |
@@ -181,7 +181,7 @@ pusher.sh help                     # 显示帮助
 | FAIL | 否 | 错误占位内容 | `[INIT FAIL] ${TASK} ${time}` | → 1 |
 | FAIL（≥7 次） | 是 | **不改** | `[CRITICAL x${N}] ${TASK} ${time}` | +1 |
 
-**核心原则**：永不修改 gist 文件内容，仅更新 gist `description` 字段。原因：JSON / base64 订阅源加注释会破坏订阅转换服务解析；清空 gist 会导致订阅转换服务拉到空订阅。
+**核心原则**：永不修改 gist 文件内容，仅更新 gist `description` 字段。原因：JSON / base64 内容源加注释会破坏下游内容处理服务解析；清空 gist 会导致下游内容处理服务拉到空内容。
 
 ---
 
@@ -211,9 +211,9 @@ pusher.sh help                     # 显示帮助
 ├── pusher.sh              # 主脚本（chmod 755）
 ├── config.conf            # 全局配置（chmod 600，含 Token）
 ├── tasks.d/               # 任务配置目录（chmod 700）
-│   ├── airport_a.conf
-│   └── vpn_proxy.conf
-├── cache.d/               # 订阅内容缓存（失败时保留上次内容）
+│   ├── source_a.conf
+│   └── proxy_task.conf
+├── cache.d/               # 源内容缓存（失败时保留上次内容）
 ├── state.d/               # 任务状态（最后结果 / 失败计数）
 ├── logs/                  # 日志目录（按日期分文件）
 └── run.lock/              # 原子锁目录（运行时存在）
@@ -231,15 +231,15 @@ pusher.sh help                     # 显示帮助
 |------|----------|------|
 | HTTP 401 | Token 无效或过期 | 重新生成 PAT，更新 `config.conf` |
 | HTTP 403 | Token 无 `gist` 权限 | 重新生成 PAT，勾选 `gist` 权限 |
-| HTTP 422 | 文件名冲突或内容超 1MB | 检查文件名；订阅内容超 1MB 需联系机场 |
+| HTTP 422 | 文件名冲突或内容超 1MB | 检查文件名；源内容超 1MB 需联系源站点 |
 | 速率限制 | 超过 5000 req/h | 减少 cron 频率 |
 
-### 拉取订阅失败
+### 拉取内容失败
 
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
-| HTTP 403 | UA 被机场拦截 | 添加任务时填写自定义 UA |
-| HTTP 404 | 订阅 URL 失效 | 联系机场获取新 URL |
+| HTTP 403 | UA 被源站点拦截 | 添加任务时填写自定义 UA |
+| HTTP 404 | 源 URL 失效 | 联系源站点获取新 URL |
 | SSL 证书错误 | CA 证书缺失 | 运行 `pusher.sh install-deps` |
 
 更多故障排查见 [src/README.md](src/README.md) §十。
@@ -265,7 +265,7 @@ rm -rf /etc/sub_to_gist/                     # 再删除目录
 
 ## 关联项目
 
-- [sublink-worker](https://github.com/Toperlock/sublink-worker) — 订阅转换服务，本工具产出的 Gist raw URL 作为其订阅输入
+- 下游内容处理服务 — 下游内容处理服务，本工具产出的 Gist raw URL 作为其内容输入
 - [openwrt-easytier-updater](https://github.com/ciskonc/openwrt-easytier-updater) — 同为 OpenWrt POSIX sh 工具，共享 shell 兼容性经验
 
 ---

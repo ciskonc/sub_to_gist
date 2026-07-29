@@ -490,7 +490,7 @@ print_completion() {
   2. 启动交互菜单：
      $INSTALL_DIR/$SCRIPT_NAME
 
-  3. 在菜单中选择「1) 添加订阅推送到 Gist」添加任务
+  3. 在菜单中选择「1) 添加内容推送到 Gist」添加任务
 
   4. 在菜单中选择「5) 安装/管理 cron 定时」设置自动推送
 

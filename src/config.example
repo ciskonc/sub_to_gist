@@ -22,16 +22,16 @@ GIST_DESCRIPTION_PREFIX="sub_to_gist"
 #
 # 任务配置文件格式（每个 .conf 文件一个任务）：
 #
-#   TASK_NAME="机场A"
+#   TASK_NAME="源站点A"
 #   TASK_URL="https://example.com/sub?token=xxx"
 #   TASK_UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 #   TASK_HEADERS="X-Custom-Header: value|X-Another: value2"
 #   TASK_GIST_ID=""
-#   TASK_GIST_FILENAME="airport_a.txt"
+#   TASK_GIST_FILENAME="source_a.txt"
 #
 # 字段说明：
 #   TASK_NAME          任务显示名称（用于菜单和日志，不允许特殊字符）
-#   TASK_URL           订阅地址（必须以 https:// 开头）
+#   TASK_URL           源 URL（必须以 https:// 开头）
 #   TASK_UA            自定义 User-Agent（留空使用 curl 默认 UA）
 #   TASK_HEADERS       额外请求头（格式：Key: Value|Key2: Value2，留空跳过）
 #   TASK_GIST_ID       Gist ID（首次推送后自动填入，勿手动修改）
@@ -41,4 +41,4 @@ GIST_DESCRIPTION_PREFIX="sub_to_gist"
 #   - 仅允许小写字母 / 数字 / 下划线
 #   - 必须以字母开头
 #   - 最长 32 字符
-#   - 示例：airport_a / vpn_proxy / sub_001
+#   - 示例：source_a / proxy_task / task_001

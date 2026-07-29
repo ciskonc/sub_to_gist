@@ -1,6 +1,6 @@
 # sub_to_gist — 使用说明
 
-> 订阅地址中转推送器：读取机场订阅内容，原样透传推送到 GitHub Gist，作为订阅转换服务的中转入口。
+> 网页内容中转推送器：读取远程网页内容，原样推送到 GitHub Gist，作为下游内容处理服务的数据源。
 
 ---
 
@@ -51,7 +51,7 @@ sh install.sh --auto
 | `/etc/sub_to_gist/pusher.sh` | 755 | 主脚本 |
 | `/etc/sub_to_gist/config.conf` | 600 | 全局配置（含 Token，必须 600） |
 | `/etc/sub_to_gist/tasks.d/` | 700 | 任务配置目录（每任务一个 `.conf`） |
-| `/etc/sub_to_gist/cache.d/` | 700 | 订阅内容缓存目录 |
+| `/etc/sub_to_gist/cache.d/` | 700 | 源内容缓存目录 |
 | `/etc/sub_to_gist/state.d/` | 700 | 任务状态目录（最后结果 / 失败计数） |
 | `/etc/sub_to_gist/logs/` | 700 | 日志目录（按日期分文件） |
 
@@ -91,12 +91,12 @@ PAT 生成地址：https://github.com/settings/tokens
 
 ### 2.2 任务配置 `tasks.d/{task_id}.conf`
 
-每个订阅源一个任务配置文件，建议通过菜单选项 1 添加（自动生成），也可手动创建。字段：
+每个内容源一个任务配置文件，建议通过菜单选项 1 添加（自动生成），也可手动创建。字段：
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `TASK_NAME` | ✅ | 任务显示名称（用于菜单与日志） |
-| `TASK_URL` | ✅ | 订阅地址（必须 `https://` 开头） |
+| `TASK_URL` | ✅ | 源 URL（必须 `https://` 开头） |
 | `TASK_UA` | 否 | 自定义 User-Agent（留空使用 curl 默认 UA） |
 | `TASK_HEADERS` | 否 | 额外请求头，格式 `Key: Value\|Key2: Value2` |
 | `TASK_GIST_ID` | 自动 | 首次推送后自动填入，勿手动修改 |
@@ -119,12 +119,12 @@ PAT 生成地址：https://github.com/settings/tokens
 ### 菜单选项
 
 ```
-=== Gist 订阅推送器 v1.0.2 ===
+=== Gist 内容推送器 v1.0.2 ===
 运行环境：openwrt
 Token 状态：已配置 / 未配置
 当前已有 N 个推送任务
 
-  1) 添加订阅推送到 Gist
+  1) 添加内容推送到 Gist
   2) 查看现在已有推送
   3) 删除任务
   4) 立即运行所有任务
@@ -138,7 +138,7 @@ Token 状态：已配置 / 未配置
 
 | 选项 | 功能 |
 |------|------|
-| 1 | 交互式添加新任务：输入任务 ID / 名称 / 订阅 URL / UA / 请求头 |
+| 1 | 交互式添加新任务：输入任务 ID / 名称 / 源 URL / UA / 请求头 |
 | 2 | 以 CLI 表格列出所有任务（详见 §四） |
 | 3 | 删除指定任务（仅删除本地配置与状态，**不删除已创建的 Gist**） |
 | 4 | 立即按顺序运行所有任务（与 `run-all` 命令等价） |
@@ -147,7 +147,7 @@ Token 状态：已配置 / 未配置
 | 7 | 配置 Gist Token：交互式输入 PAT → 验证有效性 → 保存到 config.conf（无需手动 vi） |
 | 8 | 检查更新：从 GitHub 获取远程版本号 → 与本地版本对比 → 有更新则自主更新（备份旧版本→覆盖→提示回滚命令） |
 
-> **首次使用流程**：启动菜单 → 7) 配置 Gist Token → 1) 添加订阅推送任务 → 5) 安装 cron 定时
+> **首次使用流程**：启动菜单 → 7) 配置 Gist Token → 1) 添加内容推送任务 → 5) 安装 cron 定时
 
 ### 自主更新机制（v1.0.2 新增）
 
@@ -198,9 +198,9 @@ sh -c "$(curl -sSL https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/sr
 
 任务ID          任务名称              上次结果    连续失败     Gist URL
 -----------------------------------------------------------------------------------------
-airport_a       机场A                 ✓ OK       0            https://gist.githubusercontent.com/abc.../raw/airport_a.txt
-vpn_proxy       代理B                 ✗ FAIL     3            https://gist.githubusercontent.com/def.../raw/vpn_proxy.txt
-sub_001         测试                  - N/A      ⚠ 7!         （未推送）
+source_a       源站点A                 ✓ OK       0            https://gist.githubusercontent.com/abc.../raw/source_a.txt
+proxy_task       代理B                 ✗ FAIL     3            https://gist.githubusercontent.com/def.../raw/proxy_task.txt
+task_001         测试                  - N/A      ⚠ 7!         （未推送）
 ```
 
 | 列 | 含义 |
@@ -277,7 +277,7 @@ pusher.sh help                     # 显示帮助
 | FAIL | 否 | 错误占位内容 | `[INIT FAIL] ${TASK} ${time}` | → 1 |
 | FAIL（≥7 次） | 是 | **不改** | `[CRITICAL x${N}] ${TASK} ${time}` | +1 |
 
-**核心原则**：永不修改 gist 文件内容，仅更新 gist `description` 字段。原因：JSON / base64 订阅源加注释会破坏订阅转换服务解析；清空 gist 会导致订阅转换服务拉到空订阅。
+**核心原则**：永不修改 gist 文件内容，仅更新 gist `description` 字段。原因：JSON / base64 内容源加注释会破坏下游内容处理服务解析；清空 gist 会导致下游内容处理服务拉到空内容。
 
 ### 404 自愈
 
@@ -308,14 +308,14 @@ pusher.sh help                     # 显示帮助
 ├── pusher.sh              # 主脚本
 ├── config.conf            # 全局配置（chmod 600）
 ├── tasks.d/               # 任务配置
-│   ├── airport_a.conf
-│   └── vpn_proxy.conf
-├── cache.d/               # 订阅内容缓存（失败时保留上次内容）
-│   ├── airport_a.cache
-│   └── vpn_proxy.cache
+│   ├── source_a.conf
+│   └── proxy_task.conf
+├── cache.d/               # 源内容缓存（失败时保留上次内容）
+│   ├── source_a.cache
+│   └── proxy_task.cache
 ├── state.d/               # 任务状态
-│   ├── airport_a.state
-│   └── vpn_proxy.state
+│   ├── source_a.state
+│   └── proxy_task.state
 ├── logs/                  # 按日期分文件
 │   └── 20260728.log
 └── run.lock/              # 原子锁目录（运行时存在）
@@ -346,17 +346,17 @@ tail -f /etc/sub_to_gist/logs/cron.log
 |------|----------|------|
 | HTTP 401 | Token 无效或过期 | 重新生成 PAT，更新 `config.conf` |
 | HTTP 403 | Token 无 `gist` 权限 | 重新生成 PAT，勾选 `gist` 权限 |
-| HTTP 422 | 文件名冲突或内容超 1MB | 检查 `TASK_GIST_FILENAME` 是否重复；订阅内容超 1MB 需联系机场 |
+| HTTP 422 | 文件名冲突或内容超 1MB | 检查 `TASK_GIST_FILENAME` 是否重复；源内容超 1MB 需联系源站点 |
 | 速率限制 | 超过 5000 req/h | 减少 cron 频率；检查是否有其他工具占用配额 |
 
-### 10.2 拉取订阅失败
+### 10.2 拉取内容失败
 
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
-| HTTP 403 | UA 被机场拦截 | 通过菜单 1 添加任务时填写自定义 UA |
-| HTTP 404 | 订阅 URL 失效 | 联系机场获取新 URL |
+| HTTP 403 | UA 被源站点拦截 | 通过菜单 1 添加任务时填写自定义 UA |
+| HTTP 404 | 源 URL 失效 | 联系源站点获取新 URL |
 | SSL 证书错误 | CA 证书缺失 | 运行 `pusher.sh install-deps` |
-| 连接超时 | 网络问题或机场封禁 IP | 检查网络；尝试更换 UA 或请求头 |
+| 连接超时 | 网络问题或源站点封禁 IP | 检查网络；尝试更换 UA 或请求头 |
 
 ### 10.3 cron 不执行
 
@@ -390,13 +390,13 @@ cat /etc/sub_to_gist/state.d/{task_id}.state
 rm -rf /etc/sub_to_gist/                     # 再删除目录
 ```
 
-> 卸载**不会**删除已创建的 GitHub Gist。如需清理，请手动到 https://gist.github.com 删除，或运行 `pusher.sh rotate-gist <task_id>` 后中断（会删除旧 gist 但不创建新 gist 仅当订阅拉取失败时）。
+> 卸载**不会**删除已创建的 GitHub Gist。如需清理，请手动到 https://gist.github.com 删除，或运行 `pusher.sh rotate-gist <task_id>` 后中断（会删除旧 gist 但不创建新 gist 仅当内容拉取失败时）。
 
 ---
 
 ## 十二、关联项目
 
-- **sublink-worker**：订阅转换服务，本工具产出的 Gist raw URL 作为其订阅输入
+- **下游内容处理服务**：本工具产出的 Gist raw URL 作为其内容输入
 - **openwrt-easytier-updater**：同为 OpenWrt POSIX sh 工具，共享 shell 兼容性经验
 
 ---
