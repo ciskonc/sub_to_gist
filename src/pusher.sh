@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.3"
+VERSION="1.0.4"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -219,6 +219,26 @@ validate_task_id() {
         return 1
     fi
     return 0
+}
+
+# 从 URL 或字符串中提取 gist_id
+# 支持：https://gist.github.com/{user}/{id} / https://gist.githubusercontent.com/{user}/{id}/raw/{file} / 裸 ID
+# 输出：gist_id（成功）/ 空（失败）
+parse_gist_id() {
+    local input="$1"
+    # 去除首尾空白与尾随斜杠
+    input="${input#/}"
+    input="${input%/}"
+    # 若是 URL，取最后一段路径
+    case "$input" in
+        */*) input="${input##*/}" ;;
+    esac
+    # 验证格式：20-40 位十六进制（GitHub gist_id 实际长度）
+    if printf '%s' "$input" | grep -qE '^[0-9a-f]{20,40}$'; then
+        printf '%s' "$input"
+        return 0
+    fi
+    return 1
 }
 
 # 保存配置文件（原子写）：save_conf <file> <key1> <val1> <key2> <val2> ...
@@ -1008,6 +1028,24 @@ action_add_task() {
     # 生成默认 gist 文件名
     local gist_filename="${task_id}.txt"
 
+    # 询问是否使用已有 gist（留空则首次运行时自动创建）
+    local task_gist_id=""
+    printf '请输入已有 Gist URL 或 ID（留空则首次运行时自动创建）：'
+    read -r task_gist_id
+    if [ -n "$task_gist_id" ]; then
+        task_gist_id=$(parse_gist_id "$task_gist_id")
+        if [ -z "$task_gist_id" ]; then
+            echo "无法从输入中提取有效的 gist_id（应为 20-40 位十六进制）"
+            printf '是否改为首次运行时自动创建？[y/N] '
+            local confirm_auto
+            read -r confirm_auto
+            case "$confirm_auto" in
+                y|Y) task_gist_id="" ;;
+                *) return 1 ;;
+            esac
+        fi
+    fi
+
     # 保存配置
     mkdir -p "$TASKS_DIR" 2>/dev/null
     save_conf "$TASKS_DIR/${task_id}.conf" \
@@ -1015,7 +1053,7 @@ action_add_task() {
         TASK_URL "$task_url" \
         TASK_UA "$task_ua" \
         TASK_HEADERS "$task_headers" \
-        TASK_GIST_ID "" \
+        TASK_GIST_ID "$task_gist_id" \
         TASK_GIST_FILENAME "$gist_filename"
     chmod 600 "$TASKS_DIR/${task_id}.conf" 2>/dev/null
 
@@ -1027,6 +1065,11 @@ action_add_task() {
     echo "  User-Agent：${task_ua:-（默认）}"
     echo "  额外请求头：${task_headers:-（无）}"
     echo "  Gist 文件名：$gist_filename"
+    if [ -n "$task_gist_id" ]; then
+        echo "  Gist ID：$task_gist_id（使用已有 gist，运行时 PATCH 更新）"
+    else
+        echo "  Gist ID：（首次运行时自动创建）"
+    fi
     echo ""
     echo "配置文件：$TASKS_DIR/${task_id}.conf"
     return 0

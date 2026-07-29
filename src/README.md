@@ -99,7 +99,7 @@ PAT 生成地址：https://github.com/settings/tokens
 | `TASK_URL` | ✅ | 源 URL（必须 `https://` 开头） |
 | `TASK_UA` | 否 | 自定义 User-Agent（留空使用 curl 默认 UA） |
 | `TASK_HEADERS` | 否 | 额外请求头，格式 `Key: Value\|Key2: Value2` |
-| `TASK_GIST_ID` | 自动 | 首次推送后自动填入，勿手动修改 |
+| `TASK_GIST_ID` | 否 | 已有 Gist ID 或 URL（留空则首次运行时自动创建新 Gist），支持格式：`https://gist.github.com/{user}/{id}` / 裸 ID（20-40 位十六进制） |
 | `TASK_GIST_FILENAME` | 自动 | Gist 中的文件名，默认 `{task_id}.txt` |
 
 任务 ID 命名规则：`^[a-z][a-z0-9_]{0,31}$`（小写字母开头，仅小写字母/数字/下划线，最长 32 字符）。
@@ -138,7 +138,7 @@ Token 状态：已配置 / 未配置
 
 | 选项 | 功能 |
 |------|------|
-| 1 | 交互式添加新任务：输入任务 ID / 名称 / 源 URL / UA / 请求头 |
+| 1 | 交互式添加新任务：输入任务 ID / 名称 / 源 URL / UA / 请求头 / 已有 Gist URL（留空自动创建） |
 | 2 | 以 CLI 表格列出所有任务（详见 §四） |
 | 3 | 删除指定任务（仅删除本地配置与状态，**不删除已创建的 Gist**） |
 | 4 | 立即按顺序运行所有任务（与 `run-all` 命令等价） |

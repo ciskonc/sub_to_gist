@@ -100,7 +100,7 @@ vi /etc/sub_to_gist/config.conf
 ```
 
 ```
-=== Gist 内容推送器 v1.0.2 ===
+=== Gist 内容推送器 v1.0.4 ===
 运行环境：openwrt
 Token 状态：已配置
 当前已有 2 个推送任务
@@ -164,7 +164,7 @@ pusher.sh help                     # 显示帮助
 | `TASK_URL` | ✅ | 源 URL（必须 `https://` 开头） |
 | `TASK_UA` | 否 | 自定义 User-Agent（留空使用 curl 默认 UA） |
 | `TASK_HEADERS` | 否 | 额外请求头，格式 `Key: Value\|Key2: Value2` |
-| `TASK_GIST_ID` | 自动 | 首次推送后自动填入，勿手动修改 |
+| `TASK_GIST_ID` | 否 | 已有 Gist ID 或 URL（留空则首次运行时自动创建），支持 `https://gist.github.com/{user}/{id}` 或裸 ID |
 | `TASK_GIST_FILENAME` | 自动 | Gist 中的文件名，默认 `{task_id}.txt` |
 
 任务 ID 命名规则：`^[a-z][a-z0-9_]{0,31}$`（小写字母开头，仅小写字母/数字/下划线，最长 32 字符）。
