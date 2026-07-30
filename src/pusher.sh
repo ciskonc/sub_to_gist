@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.10"
+VERSION="1.0.11"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -156,7 +156,9 @@ load_conf() {
     [ -f "$file" ] || return 1
     # 先校验格式：仅允许 KEY="VALUE" 或注释行或空行
     # 注意：BusyBox grep 不支持 \s，用 [[:space:]] 替代
-    if ! grep -vE '^[A-Z_]+="[^"]*"$' "$file" | grep -vE '^[[:space:]]*$|^[[:space:]]*#' >/dev/null 2>&1; then
+    # 修复 v1.0.11：原逻辑写反（! grep -vE ... | grep -vE），合法文件被误报为非法
+    # 新逻辑：找出既不是 KEY="VALUE" 也不是空行/注释的行，有输出则报错
+    if grep -vE '^[A-Z_]+="[^"]*"$|^[[:space:]]*$|^[[:space:]]*#' "$file" | grep -q .; then
         log "ERROR" "配置文件格式非法：$file（仅允许 KEY=\"VALUE\" 格式）"
         return 1
     fi
