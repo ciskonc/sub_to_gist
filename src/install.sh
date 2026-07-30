@@ -23,7 +23,7 @@
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.8"
+VERSION="1.0.9"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"
@@ -33,7 +33,7 @@ GITHUB_RAW_BASE="https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src"
 GITHUB_MIRROR_BASE="https://ghproxy.net/https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src"
 
 # 实际使用的 GitHub base URL（启动时自动选择）
-GITHUB_BASE="$GITHUB_BASE"
+GITHUB_BASE="$GITHUB_RAW_BASE"
 
 # 网络安装模式临时目录（用于 trap 清理）
 DEPLOY_TMP_DIR=""
