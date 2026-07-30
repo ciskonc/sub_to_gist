@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.15"
+VERSION="1.0.16"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1540,7 +1540,10 @@ action_check_update() {
 
         local tmp_script
         tmp_script=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_install.$$")
-        if ! curl -sSL --fail --connect-timeout 10 --max-time 60 "$use_url" \
+        # v1.0.16 修复：加 Cache-Control 头 + 时间戳绕过 CDN 缓存
+        if ! curl -sSL --fail --connect-timeout 10 --max-time 60 \
+            -H "Cache-Control: no-cache" \
+            "${use_url}?t=$(date +%s)" \
             -o "$tmp_script" 2>/dev/null || [ ! -s "$tmp_script" ]; then
             echo "[ERROR] 下载 install.sh 失败（GitHub 和加速地址均不可达）"
             echo ""
@@ -1552,15 +1555,48 @@ action_check_update() {
             return 1
         fi
         chmod 755 "$tmp_script"
+        local before_version
+        before_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
         sh "$tmp_script" --upgrade
         local rc=$?
         rm -f "$tmp_script" 2>/dev/null
+        # v1.0.16 修复：更新后提示用户重启脚本
+        if [ $rc -eq 0 ]; then
+            local after_version
+            after_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
+            if [ "$before_version" != "$after_version" ] && [ -n "$after_version" ]; then
+                echo ""
+                echo "[重要] 脚本已更新：v${before_version} → v${after_version}"
+                echo "[重要] 当前运行的仍是旧版本进程，请退出脚本后重新启动以使用新版本："
+                echo "       sh /etc/sub_to_gist/pusher.sh"
+                echo ""
+                printf '按回车返回主菜单（建议退出后重新启动）...'
+                read -r dummy
+            fi
+        fi
         return $rc
     fi
 
     # 本地有 install.sh，直接调用（install.sh 内部会处理加速地址）
+    local before_version
+    before_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
     sh "$install_script" --upgrade
-    return $?
+    local rc=$?
+    # v1.0.16 修复：更新后提示用户重启脚本（旧进程仍在内存中运行）
+    if [ $rc -eq 0 ]; then
+        local after_version
+        after_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
+        if [ "$before_version" != "$after_version" ] && [ -n "$after_version" ]; then
+            echo ""
+            echo "[重要] 脚本已更新：v${before_version} → v${after_version}"
+            echo "[重要] 当前运行的仍是旧版本进程，请退出脚本后重新启动以使用新版本："
+            echo "       sh /etc/sub_to_gist/pusher.sh"
+            echo ""
+            printf '按回车返回主菜单（建议退出后重新启动）...'
+            read -r dummy
+        fi
+    fi
+    return $rc
 }
 
 # 主菜单

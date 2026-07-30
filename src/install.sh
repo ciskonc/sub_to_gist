@@ -23,7 +23,7 @@
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.9"
+VERSION="1.0.10"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"
@@ -97,8 +97,16 @@ detect_install_mode() {
 download_file() {
     local url="$1"
     local dst="$2"
+    # v1.0.10 修复：加 Cache-Control 头 + 时间戳参数绕过 CDN 缓存
+    local separator="?"
+    case "$url" in
+        *\?*) separator="&" ;;
+    esac
+    url="${url}${separator}t=$(date +%s)"
     echo_info "下载：$url"
-    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$url" -o "$dst" 2>/dev/null; then
+    if curl -sSL --fail --connect-timeout 10 --max-time 60 \
+        -H "Cache-Control: no-cache" \
+        "$url" -o "$dst" 2>/dev/null; then
         if [ -s "$dst" ]; then
             echo_ok "下载完成：$dst"
             return 0
@@ -142,7 +150,11 @@ extract_version() {
 # 输出：版本号字符串（失败时输出空字符串）
 get_remote_version() {
     local tmp_file="$1"
-    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$GITHUB_BASE/$SCRIPT_NAME" -o "$tmp_file" 2>/dev/null; then
+    # v1.0.10 修复：加 Cache-Control 头 + 时间戳参数绕过 CDN 缓存
+    local cache_bust="?t=$(date +%s)"
+    if curl -sSL --fail --connect-timeout 10 --max-time 60 \
+        -H "Cache-Control: no-cache" \
+        "$GITHUB_BASE/$SCRIPT_NAME$cache_bust" -o "$tmp_file" 2>/dev/null; then
         if [ -s "$tmp_file" ]; then
             extract_version "$tmp_file"
         fi
@@ -483,7 +495,10 @@ do_upgrade() {
     if [ ! -f "$INSTALL_DIR/$CONFIG_NAME" ]; then
         local tmp_config
         tmp_config=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_config.$$")
-        if curl -sSL --fail --connect-timeout 10 --max-time 30 "$GITHUB_BASE/$CONFIG_TEMPLATE" -o "$tmp_config" 2>/dev/null && [ -s "$tmp_config" ]; then
+        # v1.0.10 修复：加 Cache-Control 头 + 时间戳绕过 CDN 缓存
+        if curl -sSL --fail --connect-timeout 10 --max-time 30 \
+            -H "Cache-Control: no-cache" \
+            "$GITHUB_BASE/$CONFIG_TEMPLATE?t=$(date +%s)" -o "$tmp_config" 2>/dev/null && [ -s "$tmp_config" ]; then
             cp "$tmp_config" "$INSTALL_DIR/$CONFIG_NAME"
             chmod 600 "$INSTALL_DIR/$CONFIG_NAME"
             echo_ok "配置模板已更新"
