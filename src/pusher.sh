@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.11"
+VERSION="1.0.12"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -813,6 +813,15 @@ push_task() {
                 rm -f "$tmp_file"
                 return push_task "$task_id"
                 ;;
+            403)
+                log "ERROR" "任务 $task_id 更新 gist 失败（HTTP 403 权限不足）"
+                log "ERROR" "请检查 Token 权限：fine-grained PAT 需 Gists=Read and Write / classic PAT 需勾选 gist scope"
+                rm -f "$tmp_file"
+                local fail_desc="[FAIL x$((CONSECUTIVE_FAILURES + 1))] ${TASK_NAME} ${now}"
+                gist_update_description "$GIST_TOKEN" "$TASK_GIST_ID" "$fail_desc" >/dev/null 2>&1
+                set_state "$task_id" "FAIL" "$now" $((CONSECUTIVE_FAILURES + 1)) "$LAST_GIST_URL"
+                return 1
+                ;;
             *)
                 log "ERROR" "任务 $task_id 更新 gist 失败（HTTP $http_code）"
                 rm -f "$tmp_file"
@@ -874,8 +883,10 @@ run_all_tasks() {
         return 0
     fi
 
-    ls "$TASKS_DIR"/*.conf 2>/dev/null | while IFS= read -r conf_file; do
-        [ -z "$conf_file" ] && continue
+    # 修复 v1.0.12：原管道形式 while 在子 shell 中执行，计数器变量无法传回父 shell
+    # 改用 for 循环，避免子 shell 作用域问题
+    for conf_file in "$TASKS_DIR"/*.conf; do
+        [ -f "$conf_file" ] || continue
         local task_id
         task_id=$(basename "$conf_file" .conf)
         task_count=$((task_count + 1))
