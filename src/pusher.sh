@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.13"
+VERSION="1.0.14"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1059,9 +1059,9 @@ action_list_tasks() {
         return 0
     fi
 
-    # 表头
-    printf '%-15s %-20s %-10s %-12s %-40s\n' "任务ID" "任务名称" "上次结果" "连续失败" "Gist URL"
-    printf '%s\n' "-----------------------------------------------------------------------------------------"
+    # 表头（v1.0.14 新增源 URL 列）
+    printf '%-12s %-12s %-35s %-10s %-8s\n' "任务ID" "任务名称" "源 URL" "上次结果" "连续失败"
+    printf '%s\n' "--------------------------------------------------------------------------------------------------------"
 
     ls "$TASKS_DIR"/*.conf 2>/dev/null | while IFS= read -r conf_file; do
         [ -z "$conf_file" ] && continue
@@ -1070,6 +1070,7 @@ action_list_tasks() {
 
         # 加载任务配置
         TASK_NAME=""
+        TASK_URL=""
         TASK_GIST_ID=""
         load_conf "$conf_file" 2>/dev/null
 
@@ -1078,7 +1079,12 @@ action_list_tasks() {
 
         local result="${LAST_RESULT:-N/A}"
         local failures="${CONSECUTIVE_FAILURES:-0}"
-        local url="${LAST_GIST_URL:-（未推送）}"
+        local src_url="${TASK_URL:-（未配置）}"
+
+        # 源 URL 截断显示（超过 35 字符显示前 32 + ...）
+        if [ ${#src_url} -gt 35 ]; then
+            src_url="${src_url%"${src_url#???}"}..."
+        fi
 
         # 结果状态标识
         case "$result" in
@@ -1092,7 +1098,7 @@ action_list_tasks() {
             failures="⚠ ${failures}!"
         fi
 
-        printf '%-15s %-20s %-10s %-12s %-40s\n' "$task_id" "${TASK_NAME:-（未命名）}" "$result" "$failures" "$url"
+        printf '%-12s %-12s %-35s %-10s %-8s\n' "$task_id" "${TASK_NAME:-（未命名）}" "$src_url" "$result" "$failures"
     done
     echo ""
 }
