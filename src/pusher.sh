@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.16"
+VERSION="1.0.17"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1560,18 +1560,16 @@ action_check_update() {
         sh "$tmp_script" --upgrade
         local rc=$?
         rm -f "$tmp_script" 2>/dev/null
-        # v1.0.16 修复：更新后提示用户重启脚本
+        # v1.0.17 修复：更新成功后自动重启脚本（exec 替换进程）
         if [ $rc -eq 0 ]; then
             local after_version
             after_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
             if [ "$before_version" != "$after_version" ] && [ -n "$after_version" ]; then
                 echo ""
-                echo "[重要] 脚本已更新：v${before_version} → v${after_version}"
-                echo "[重要] 当前运行的仍是旧版本进程，请退出脚本后重新启动以使用新版本："
-                echo "       sh /etc/sub_to_gist/pusher.sh"
-                echo ""
-                printf '按回车返回主菜单（建议退出后重新启动）...'
-                read -r dummy
+                echo "[OK] 脚本已更新：v${before_version} → v${after_version}"
+                echo "[INFO] 即将自动重启脚本以加载新版本..."
+                sleep 1
+                exec "$INSTALL_DIR/$SCRIPT_NAME"
             fi
         fi
         return $rc
@@ -1582,18 +1580,16 @@ action_check_update() {
     before_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
     sh "$install_script" --upgrade
     local rc=$?
-    # v1.0.16 修复：更新后提示用户重启脚本（旧进程仍在内存中运行）
+    # v1.0.17 修复：更新成功后自动重启脚本（exec 替换进程）
     if [ $rc -eq 0 ]; then
         local after_version
         after_version=$(grep '^VERSION="' "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | sed 's/^VERSION="//;s/"$//')
         if [ "$before_version" != "$after_version" ] && [ -n "$after_version" ]; then
             echo ""
-            echo "[重要] 脚本已更新：v${before_version} → v${after_version}"
-            echo "[重要] 当前运行的仍是旧版本进程，请退出脚本后重新启动以使用新版本："
-            echo "       sh /etc/sub_to_gist/pusher.sh"
-            echo ""
-            printf '按回车返回主菜单（建议退出后重新启动）...'
-            read -r dummy
+            echo "[OK] 脚本已更新：v${before_version} → v${after_version}"
+            echo "[INFO] 即将自动重启脚本以加载新版本..."
+            sleep 1
+            exec "$INSTALL_DIR/$SCRIPT_NAME"
         fi
     fi
     return $rc
