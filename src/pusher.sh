@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.14"
+VERSION="1.0.15"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -817,7 +817,7 @@ push_task() {
             TASK_GIST_ID "$TASK_GIST_ID" \
             TASK_GIST_FILENAME "$TASK_GIST_FILENAME"
 
-        gist_raw_url="https://gist.githubusercontent.com/$TASK_GIST_ID/raw/$TASK_GIST_FILENAME"
+        gist_raw_url="https://gist.githubusercontent.com/${GIST_USERNAME:-$(gist_get_user_login "$GIST_TOKEN")}/$TASK_GIST_ID/raw/$TASK_GIST_FILENAME"
     else
         # 更新已有 gist
         log "INFO" "任务 $task_id 更新 gist：$TASK_GIST_ID"
@@ -862,7 +862,7 @@ push_task() {
                 return 1
                 ;;
         esac
-        gist_raw_url="https://gist.githubusercontent.com/$TASK_GIST_ID/raw/$TASK_GIST_FILENAME"
+        gist_raw_url="https://gist.githubusercontent.com/${GIST_USERNAME:-$(gist_get_user_login "$GIST_TOKEN")}/$TASK_GIST_ID/raw/$TASK_GIST_FILENAME"
     fi
 
     # 3. 更新缓存（原子写）
@@ -900,6 +900,12 @@ run_all_tasks() {
     if ! gist_check_token "$GIST_TOKEN"; then
         release_lock
         return 1
+    fi
+
+    # 获取 GitHub 用户名（v1.0.15 新增，用于构造正确的 gist raw URL）
+    GIST_USERNAME=$(gist_get_user_login "$GIST_TOKEN")
+    if [ -z "$GIST_USERNAME" ]; then
+        log "WARN" "无法获取 GitHub 用户名，gist raw URL 可能无法访问"
     fi
 
     local task_count=0
@@ -1059,19 +1065,19 @@ action_list_tasks() {
         return 0
     fi
 
-    # 表头（v1.0.14 新增源 URL 列）
-    printf '%-12s %-12s %-35s %-10s %-8s\n' "任务ID" "任务名称" "源 URL" "上次结果" "连续失败"
-    printf '%s\n' "--------------------------------------------------------------------------------------------------------"
-
+    # v1.0.15 重新设计：垂直布局，每行一个字段，URL 完整显示不截断
+    local task_index=0
     ls "$TASKS_DIR"/*.conf 2>/dev/null | while IFS= read -r conf_file; do
         [ -z "$conf_file" ] && continue
         local task_id
         task_id=$(basename "$conf_file" .conf)
+        task_index=$((task_index + 1))
 
         # 加载任务配置
         TASK_NAME=""
         TASK_URL=""
         TASK_GIST_ID=""
+        TASK_GIST_FILENAME=""
         load_conf "$conf_file" 2>/dev/null
 
         # 加载状态
@@ -1079,12 +1085,6 @@ action_list_tasks() {
 
         local result="${LAST_RESULT:-N/A}"
         local failures="${CONSECUTIVE_FAILURES:-0}"
-        local src_url="${TASK_URL:-（未配置）}"
-
-        # 源 URL 截断显示（超过 35 字符显示前 32 + ...）
-        if [ ${#src_url} -gt 35 ]; then
-            src_url="${src_url%"${src_url#???}"}..."
-        fi
 
         # 结果状态标识
         case "$result" in
@@ -1098,7 +1098,18 @@ action_list_tasks() {
             failures="⚠ ${failures}!"
         fi
 
-        printf '%-12s %-12s %-35s %-10s %-8s\n' "$task_id" "${TASK_NAME:-（未命名）}" "$src_url" "$result" "$failures"
+        # 构造目标 gist URL（使用已保存的 LAST_GIST_URL 或从配置构造）
+        local gist_url="${LAST_GIST_URL:-（未推送）}"
+
+        if [ "$task_index" -gt 1 ]; then
+            echo ""
+        fi
+
+        echo "[$task_index] 任务ID：$task_id"
+        echo "    任务名称：${TASK_NAME:-（未命名）}"
+        echo "    源 URL：${TASK_URL:-（未配置）}"
+        echo "    目标 Gist URL：$gist_url"
+        echo "    上次结果：$result | 连续失败：$failures"
     done
     echo ""
 }
