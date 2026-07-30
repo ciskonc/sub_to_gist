@@ -23,7 +23,7 @@
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.6"
+VERSION="1.0.7"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"

@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.6"
+VERSION="1.0.7"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -327,26 +327,71 @@ set_state() {
 
 # ============ 并发锁（mkdir 原子锁）============
 
+# 获取锁，支持强制模式
+# $1 = force（可选，强制清理并获取锁）
 acquire_lock() {
+    local force="${1:-}"
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo $$ > "$LOCK_DIR/pid"
         trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
         return 0
-    else
-        local pid
-        pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
-        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-            # 旧进程已死亡，清理并重试
-            rm -rf "$LOCK_DIR" 2>/dev/null
-            if mkdir "$LOCK_DIR" 2>/dev/null; then
-                echo $$ > "$LOCK_DIR/pid"
-                trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
-                return 0
-            fi
+    fi
+
+    local pid
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+
+    # 强制模式：直接清理并获取锁
+    if [ "$force" = "force" ]; then
+        log "WARN" "强制清理锁（PID=$pid）"
+        kill -9 "$pid" 2>/dev/null
+        rm -rf "$LOCK_DIR" 2>/dev/null
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            echo $$ > "$LOCK_DIR/pid"
+            trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+            return 0
         fi
-        log "WARN" "无法获取锁（已有进程运行 PID=$pid）"
+        log "ERROR" "强制清理后仍无法获取锁"
         return 1
     fi
+
+    # 检查 PID 进程是否存在
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        # 旧进程已死亡，清理并重试
+        rm -rf "$LOCK_DIR" 2>/dev/null
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            echo $$ > "$LOCK_DIR/pid"
+            trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+            return 0
+        fi
+    fi
+
+    # 检查 PID 进程是否是 pusher.sh 自身（防止僵尸 curl 子进程）
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        local cmd
+        cmd=$(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ')
+        case "$cmd" in
+            *pusher.sh*|*sub_to_gist*)
+                log "WARN" "无法获取锁（已有 pusher.sh 进程运行 PID=$pid）"
+                return 1
+                ;;
+            *)
+                # PID 不是 pusher.sh，可能是僵尸 curl 子进程，自动清理
+                log "WARN" "检测到非 pusher.sh 进程持有锁（PID=$pid, cmd=$cmd），自动清理"
+                kill -9 "$pid" 2>/dev/null
+                rm -rf "$LOCK_DIR" 2>/dev/null
+                if mkdir "$LOCK_DIR" 2>/dev/null; then
+                    echo $$ > "$LOCK_DIR/pid"
+                    trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+                    return 0
+                fi
+                log "ERROR" "清理僵尸进程后仍无法获取锁"
+                return 1
+                ;;
+        esac
+    fi
+
+    log "WARN" "无法获取锁（PID=$pid）"
+    return 1
 }
 
 release_lock() {
@@ -1186,8 +1231,19 @@ action_run_all() {
     echo ""
     echo "=== 立即运行所有任务 ==="
     if ! acquire_lock; then
-        echo "已有进程在运行，请稍后再试"
-        return 1
+        echo "已有进程在运行，无法获取锁"
+        printf '是否强制清理锁并继续？[y/N] '
+        local confirm
+        read -r confirm
+        case "$confirm" in
+            y|Y)
+                if ! acquire_lock force; then
+                    echo "强制清理后仍无法获取锁，请手动执行：rm -rf $LOCK_DIR"
+                    return 1
+                fi
+                ;;
+            *) return 1 ;;
+        esac
     fi
     run_all_tasks
     release_lock
