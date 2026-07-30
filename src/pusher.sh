@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.9"
+VERSION="1.0.10"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1230,26 +1230,35 @@ action_delete_task() {
 action_run_all() {
     echo ""
     echo "=== 立即运行所有任务 ==="
-    if ! acquire_lock; then
-        echo "已有进程在运行，无法获取锁"
+
+    # run_all_tasks 内部会获取锁
+    run_all_tasks
+    local rc=$?
+
+    # 失败时询问是否强制清理锁并重试
+    if [ $rc -ne 0 ] && [ -d "$LOCK_DIR" ]; then
+        local pid
+        pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+        echo "锁被 PID=${pid:-未知} 持有"
         printf '是否强制清理锁并继续？[y/N] '
         local confirm
         read -r confirm
         case "$confirm" in
             y|Y)
-                if ! acquire_lock force; then
-                    echo "强制清理后仍无法获取锁，请手动执行：rm -rf $LOCK_DIR"
-                    return 1
-                fi
+                kill -9 "$pid" 2>/dev/null
+                rm -rf "$LOCK_DIR"
+                echo "已强制清理锁，重试..."
+                run_all_tasks
+                rc=$?
                 ;;
             *) return 1 ;;
         esac
     fi
-    run_all_tasks
-    release_lock
+
     echo ""
     printf '按回车返回主菜单...'
     read -r dummy
+    return $rc
 }
 
 # 管理 cron
