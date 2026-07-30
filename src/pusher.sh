@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.7"
+VERSION="1.0.8"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -1442,15 +1442,33 @@ action_check_update() {
 
     local install_script="$INSTALL_DIR/install.sh"
 
-    # install.sh 不在 INSTALL_DIR 时，从 GitHub raw 下载到临时文件执行
+    # install.sh 不在 INSTALL_DIR 时，从 GitHub 下载到临时文件执行
     if [ ! -f "$install_script" ]; then
         echo "本地未找到 install.sh，从 GitHub 下载临时副本..."
+
+        # 测试直连 GitHub raw 是否可用（3 秒超时）
+        local github_url="https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh"
+        local mirror_url="https://ghproxy.net/https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh"
+        local use_url="$github_url"
+
+        echo "测试 GitHub 直连（3 秒超时）..."
+        if curl -sSL --fail --connect-timeout 3 --max-time 5 -o /dev/null "$github_url" 2>/dev/null; then
+            echo "[OK] GitHub 直连可用"
+        else
+            echo "[WARN] GitHub 直连不可达，切换到加速地址"
+            use_url="$mirror_url"
+        fi
+
         local tmp_script
         tmp_script=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_install.$$")
-        if ! curl -sSL --fail --connect-timeout 10 --max-time 60 \
-            "https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src/install.sh" \
+        if ! curl -sSL --fail --connect-timeout 10 --max-time 60 "$use_url" \
             -o "$tmp_script" 2>/dev/null || [ ! -s "$tmp_script" ]; then
-            echo "[ERROR] 下载 install.sh 失败（网络错误或 GitHub 不可达）"
+            echo "[ERROR] 下载 install.sh 失败（GitHub 和加速地址均不可达）"
+            echo ""
+            echo "手动解决方案："
+            echo "  1. 使用手机热点或其他网络重试"
+            echo "  2. 手动下载 install.sh 到 /etc/sub_to_gist/install.sh 后执行："
+            echo "     sh /etc/sub_to_gist/install.sh --upgrade"
             rm -f "$tmp_script" 2>/dev/null
             return 1
         fi
@@ -1461,7 +1479,7 @@ action_check_update() {
         return $rc
     fi
 
-    # 本地有 install.sh，直接调用
+    # 本地有 install.sh，直接调用（install.sh 内部会处理加速地址）
     sh "$install_script" --upgrade
     return $?
 }

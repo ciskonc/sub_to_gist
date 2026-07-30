@@ -23,13 +23,17 @@
 set -u
 
 # ============ 常量 ============
-VERSION="1.0.7"
+VERSION="1.0.8"
 INSTALL_DIR="/etc/sub_to_gist"
 SCRIPT_NAME="pusher.sh"
 CONFIG_NAME="config.conf"
 CONFIG_TEMPLATE="config.example"
 DIRS_TO_CREATE="tasks.d cache.d state.d logs"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src"
+GITHUB_MIRROR_BASE="https://ghproxy.net/https://raw.githubusercontent.com/ciskonc/sub_to_gist/main/src"
+
+# 实际使用的 GitHub base URL（启动时自动选择）
+GITHUB_BASE="$GITHUB_BASE"
 
 # 网络安装模式临时目录（用于 trap 清理）
 DEPLOY_TMP_DIR=""
@@ -43,6 +47,29 @@ case "$SCRIPT_DIR" in
 esac
 
 # ============ 环境检测 ============
+
+# 选择 GitHub base URL：直连失败则切换到加速地址
+# 自动调用，设置 GITHUB_BASE 变量
+select_github_base() {
+    # 测试直连 GitHub raw 是否可用（3 秒超时）
+    if curl -sSL --fail --connect-timeout 3 --max-time 5 \
+        -o /dev/null "$GITHUB_RAW_BASE/$SCRIPT_NAME" 2>/dev/null; then
+        GITHUB_BASE="$GITHUB_RAW_BASE"
+        return 0
+    fi
+
+    # 直连失败，测试加速地址
+    if curl -sSL --fail --connect-timeout 3 --max-time 5 \
+        -o /dev/null "$GITHUB_MIRROR_BASE/$SCRIPT_NAME" 2>/dev/null; then
+        GITHUB_BASE="$GITHUB_MIRROR_BASE"
+        echo_warn "GitHub 直连不可达，切换到加速地址"
+        return 0
+    fi
+
+    # 两个地址都不可达
+    echo_error "GitHub 直连和加速地址均不可达"
+    return 1
+}
 
 detect_env() {
     if [ -f /etc/openwrt_release ]; then
@@ -115,7 +142,7 @@ extract_version() {
 # 输出：版本号字符串（失败时输出空字符串）
 get_remote_version() {
     local tmp_file="$1"
-    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$GITHUB_RAW_BASE/$SCRIPT_NAME" -o "$tmp_file" 2>/dev/null; then
+    if curl -sSL --fail --connect-timeout 10 --max-time 60 "$GITHUB_BASE/$SCRIPT_NAME" -o "$tmp_file" 2>/dev/null; then
         if [ -s "$tmp_file" ]; then
             extract_version "$tmp_file"
         fi
@@ -263,17 +290,17 @@ deploy_files() {
         src_script="$DEPLOY_TMP_DIR/$SCRIPT_NAME"
         src_config="$DEPLOY_TMP_DIR/$CONFIG_TEMPLATE"
 
-        if ! download_file "$GITHUB_RAW_BASE/$SCRIPT_NAME" "$src_script"; then
+        if ! download_file "$GITHUB_BASE/$SCRIPT_NAME" "$src_script"; then
             return 1
         fi
-        if ! download_file "$GITHUB_RAW_BASE/$CONFIG_TEMPLATE" "$src_config"; then
+        if ! download_file "$GITHUB_BASE/$CONFIG_TEMPLATE" "$src_config"; then
             return 1
         fi
     else
         # 本地模式：检查源文件
         if [ ! -f "$src_script" ]; then
             echo_error "源脚本不存在：$src_script"
-            echo_error "若使用网络安装，请执行：sh -c \"\$(curl -sSL $GITHUB_RAW_BASE/install.sh)\""
+            echo_error "若使用网络安装，请执行：sh -c \"\$(curl -sSL $GITHUB_BASE/install.sh)\""
             return 1
         fi
         if [ ! -f "$src_config" ]; then
@@ -387,6 +414,12 @@ do_upgrade() {
     echo "============================================================"
     echo ""
 
+    # 选择 GitHub base URL（直连或加速地址）
+    if ! select_github_base; then
+        echo_error "GitHub 不可达，无法检查更新"
+        return 1
+    fi
+
     local local_version
     local_version=$(get_local_version)
 
@@ -397,7 +430,7 @@ do_upgrade() {
     fi
 
     echo_info "本地版本：v$local_version"
-    echo_info "正在检查远程版本（$GITHUB_RAW_BASE）..."
+    echo_info "正在检查远程版本（$GITHUB_BASE）..."
 
     local tmp_file
     tmp_file=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_upgrade.$$")
@@ -450,7 +483,7 @@ do_upgrade() {
     if [ ! -f "$INSTALL_DIR/$CONFIG_NAME" ]; then
         local tmp_config
         tmp_config=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_config.$$")
-        if curl -sSL --fail --connect-timeout 10 --max-time 30 "$GITHUB_RAW_BASE/$CONFIG_TEMPLATE" -o "$tmp_config" 2>/dev/null && [ -s "$tmp_config" ]; then
+        if curl -sSL --fail --connect-timeout 10 --max-time 30 "$GITHUB_BASE/$CONFIG_TEMPLATE" -o "$tmp_config" 2>/dev/null && [ -s "$tmp_config" ]; then
             cp "$tmp_config" "$INSTALL_DIR/$CONFIG_NAME"
             chmod 600 "$INSTALL_DIR/$CONFIG_NAME"
             echo_ok "配置模板已更新"
@@ -540,6 +573,11 @@ EOF
     echo "============================================================"
     echo "  sub_to_gist v$VERSION 部署脚本"
     echo "============================================================"
+
+    # 选择 GitHub base URL（直连或加速地址）
+    if ! select_github_base; then
+        echo_warn "GitHub 不可达，仅本地模式可用"
+    fi
 
     local total_steps=5
     local current_step=1
