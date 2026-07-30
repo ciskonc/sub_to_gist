@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.5"
+VERSION="1.0.6"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -131,12 +131,8 @@ log() {
     sanitize_log "$msg" | while IFS= read -r line; do
         echo "[$timestamp] [$level] $line" >> "$log_file"
     done
-    # 同时输出到 stderr（如果非交互）
-    if [ -t 1 ]; then
-        : # 交互模式，菜单自己处理输出
-    else
-        echo "[$timestamp] [$level] $msg" >&2
-    fi
+    # 同时输出到 stderr（终端和 cron 都可见）
+    echo "[$timestamp] [$level] $msg" >&2
 }
 
 # 日志脱敏：过滤 token / Bearer / 密码模式
@@ -381,6 +377,8 @@ gist_check_token() {
         printf -- '--header "User-Agent: sub_to_gist/%s"\n' "$VERSION"
         printf -- '--url "https://api.github.com/gists"\n'
         printf -- '--request "GET"\n'
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
         printf -- '--silent\n'
         printf -- '--output "/dev/null"\n'
         printf -- '--write-out "%%{http_code}"\n'
@@ -433,6 +431,8 @@ gist_create() {
         printf -- '--url "%s"\n' "$GIST_API_BASE"
         printf -- '--request "POST"\n'
         printf -- '--data-binary "@%s"\n' "$payload_file"
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
         printf -- '--silent\n'
         printf -- '--include\n'
     } | curl --config - 2>/dev/null)
@@ -489,6 +489,8 @@ gist_update_content() {
         printf -- '--url "%s/%s"\n' "$GIST_API_BASE" "$gist_id"
         printf -- '--request "PATCH"\n'
         printf -- '--data-binary "@%s"\n' "$payload_file"
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
         printf -- '--silent\n'
         printf -- '--output "/dev/null"\n'
         printf -- '--write-out "%%{http_code}"\n'
@@ -523,6 +525,8 @@ gist_update_description() {
         printf -- '--url "%s/%s"\n' "$GIST_API_BASE" "$gist_id"
         printf -- '--request "PATCH"\n'
         printf -- '--data-binary "@%s"\n' "$payload_file"
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
         printf -- '--silent\n'
         printf -- '--output "/dev/null"\n'
         printf -- '--write-out "%%{http_code}"\n'
@@ -546,6 +550,8 @@ gist_delete() {
         printf -- '--header "User-Agent: sub_to_gist/%s"\n' "$VERSION"
         printf -- '--url "%s/%s"\n' "$GIST_API_BASE" "$gist_id"
         printf -- '--request "DELETE"\n'
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
         printf -- '--silent\n'
         printf -- '--output "/dev/null"\n'
         printf -- '--write-out "%%{http_code}"\n'
@@ -1185,6 +1191,9 @@ action_run_all() {
     fi
     run_all_tasks
     release_lock
+    echo ""
+    printf '按回车返回主菜单...'
+    read -r dummy
 }
 
 # 管理 cron

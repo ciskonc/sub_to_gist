@@ -119,7 +119,7 @@ PAT 生成地址：https://github.com/settings/tokens
 ### 菜单选项
 
 ```
-=== Gist 内容推送器 v1.0.5 ===
+=== Gist 内容推送器 v1.0.6 ===
 运行环境：openwrt
 Token 状态：已配置 / 未配置
 当前已有 N 个推送任务
