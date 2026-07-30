@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.12"
+VERSION="1.0.13"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -436,6 +436,36 @@ gist_check_token() {
         403) log "ERROR" "Token 权限不足或触发速率限制（HTTP 403）"; return 1 ;;
         *)   log "ERROR" "Token 验证失败（HTTP $http_code）"; return 1 ;;
     esac
+}
+
+# 获取 Token 对应的 GitHub 用户登录名（v1.0.13 新增）
+# $1 = token
+# 输出：用户登录名（成功）/ 空（失败）
+gist_get_user_login() {
+    local token="$1"
+    local response
+    response=$(mktemp 2>/dev/null || echo "/tmp/sub_to_gist_user.$$")
+    local http_code
+    http_code=$({
+        printf -- '--header "Authorization: Bearer %s"\n' "$token"
+        printf -- '--header "Accept: application/vnd.github+json"\n'
+        printf -- '--header "X-GitHub-Api-Version: 2022-11-28"\n'
+        printf -- '--header "User-Agent: sub_to_gist/%s"\n' "$VERSION"
+        printf -- '--url "https://api.github.com/user"\n'
+        printf -- '--request "GET"\n'
+        printf -- '--connect-timeout "10"\n'
+        printf -- '--max-time "60"\n'
+        printf -- '--silent\n'
+        printf -- '--output "%s"\n' "$response"
+        printf -- '--write-out "%%{http_code}"\n'
+    } | curl --config - 2>/dev/null)
+
+    local login=""
+    if [ "$http_code" = "200" ] && [ -s "$response" ]; then
+        login=$(json_extract "$(cat "$response")" "login")
+    fi
+    rm -f "$response"
+    printf '%s' "$login"
 }
 
 # 创建 gist
@@ -1438,6 +1468,15 @@ action_configure_token() {
     fi
     echo "[OK] Token 验证通过"
 
+    # 获取 GitHub 用户信息（v1.0.13 新增）
+    local user_login
+    user_login=$(gist_get_user_login "$new_token")
+    if [ -n "$user_login" ]; then
+        echo "  GitHub 用户名：$user_login"
+    else
+        echo "  [WARN] 无法获取用户信息（Token 可能权限不足）"
+    fi
+
     # 保存到 config.conf（保留 GIST_DESCRIPTION_PREFIX）
     save_conf "$CONFIG_FILE" \
         GIST_TOKEN "$new_token" \
@@ -1448,6 +1487,7 @@ action_configure_token() {
     echo "Token 已保存到：$CONFIG_FILE"
     echo "  GIST_TOKEN：已更新"
     echo "  GIST_DESCRIPTION_PREFIX：$desc_prefix"
+    echo "  GitHub 用户名：${user_login:-（获取失败）}"
     echo "  文件权限：600"
     echo ""
     echo "提示：现在可以选择「1) 添加内容推送到 Gist」创建任务"
