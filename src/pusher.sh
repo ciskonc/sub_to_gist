@@ -22,7 +22,7 @@ set -u
 umask 077
 
 # ============ 常量 ============
-VERSION="1.0.17"
+VERSION="1.0.18"
 INSTALL_DIR="/etc/sub_to_gist"
 CONFIG_FILE="$INSTALL_DIR/config.conf"
 TASKS_DIR="$INSTALL_DIR/tasks.d"
@@ -921,15 +921,34 @@ run_all_tasks() {
 
     # 修复 v1.0.12：原管道形式 while 在子 shell 中执行，计数器变量无法传回父 shell
     # 改用 for 循环，避免子 shell 作用域问题
+    # v1.0.18 新增：单任务失败时重试最多 3 次，每次间隔 30 秒
+    local MAX_RETRIES=3
+    local RETRY_INTERVAL=30
     for conf_file in "$TASKS_DIR"/*.conf; do
         [ -f "$conf_file" ] || continue
         local task_id
         task_id=$(basename "$conf_file" .conf)
         task_count=$((task_count + 1))
-        if push_task "$task_id"; then
+
+        local attempt=1
+        local task_success=0
+        while [ "$attempt" -le "$MAX_RETRIES" ]; do
+            if push_task "$task_id"; then
+                task_success=1
+                break
+            fi
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+                log "WARN" "任务 $task_id 第 $attempt 次失败，${RETRY_INTERVAL}s 后重试（$attempt/$((MAX_RETRIES - 1))）"
+                sleep "$RETRY_INTERVAL"
+            fi
+            attempt=$((attempt + 1))
+        done
+
+        if [ "$task_success" -eq 1 ]; then
             success_count=$((success_count + 1))
         else
             fail_count=$((fail_count + 1))
+            log "ERROR" "任务 $task_id 重试 $MAX_RETRIES 次仍失败"
         fi
     done
 
@@ -1144,6 +1163,8 @@ action_add_task() {
         esac
     fi
     echo "自动生成任务 ID：$task_id"
+    echo "  [提示] 任务 ID 决定 Gist 文件名：${task_id}.txt"
+    echo "         Gist URL 格式：https://gist.githubusercontent.com/{用户名}/{gist_id}/raw/${task_id}.txt"
 
     printf '请输入源 URL（必须以 https:// 开头）：'
     if ! read -r task_url; then
