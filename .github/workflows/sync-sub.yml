@@ -4,7 +4,7 @@ name: sync-sub
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 22 * * *'
+    - cron: '30 22 * * *'   # UTC 22:30 = 北京时间 06:30
 
 permissions:
   contents: read
@@ -20,14 +20,14 @@ jobs:
           S2: ${{ secrets.TASK_SUB2_URL }}
         run: |
           set -e
-          # UA=PassWall2: get base64/URI list (clash UA returns YAML - not usable here)
+          # UA=PassWall2: 源站返回 base64/URI 列表（clash UA 会返回 YAML，合并管线不适用）
           curl -sS --max-time 60  -A 'PassWall2' "$S1" -o s1.raw
           curl -sS --max-time 60  -A 'PassWall2' "$S2" -o s2.raw
           for f in s1 s2; do
             if head -c 4 $f.raw | grep -q 'http'; then
               cp $f.raw $f.txt
             elif base64 -d -i $f.raw > $f.txt 2>/dev/null && grep -q '://' $f.txt; then
-              : # decoded
+              : # base64 decoded
             else
               cp $f.raw $f.txt
             fi
@@ -39,22 +39,24 @@ jobs:
       - name: Push merged content to gist sub.txt
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
         run: |
           set -e
-          jq -n --rawfile m merged.txt '{files:{"sub.txt":{content:$m}}}' > payload.json
+          jq -n --rawfile m merged.txt --arg g "$GIST_ID" '{files:{"sub.txt":{content:$m}}}' > payload.json
           HTTP=$(curl -sS -o resp.json -w '%{http_code}' -X PATCH \
             -H "Authorization: Bearer $GIST_TOKEN" \
             -H 'Content-Type: application/json' \
             --data-binary @payload.json \
-            'https://api.github.com/gists/f3191321746684c14d9dcddcad7bdd60')
+            "https://api.github.com/gists/$g")
           echo "gist PATCH HTTP=$HTTP"
           [ "$HTTP" = "200" ]
 
       - name: Verify gist freshness
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
         run: |
           sleep 2
           curl -sS -H "Authorization: Bearer $GIST_TOKEN" \
-            'https://api.github.com/gists/f3191321746684c14d9dcddcad7bdd60' \
+            "https://api.github.com/gists/$GIST_ID" \
             | grep -E '"description"|"updated_at"'
