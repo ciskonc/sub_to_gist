@@ -7,8 +7,8 @@
 name: sync-sub
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '30 22 * * *'   # UTC 22:30 = 北京时间 06:30（首轮验证通过后取消注释）
+  schedule:
+    - cron: '30 22 * * *'   # UTC 22:30 = 北京时间 06:30（2026-11-14 首轮验证通过后启用）
 
 permissions:
   contents: read
