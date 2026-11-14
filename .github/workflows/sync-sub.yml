@@ -1,0 +1,55 @@
+# sub_to_gist 云端定时同步（GitHub Actions）
+# 放置于仓库 .github/workflows/sync-sub.yml
+# 前置 Secrets（gh secret set 或网页设置）：
+#   GIST_TOKEN   —— gist 写权限 PAT（本机 Git 凭据令牌已含 gist scope 可复用）
+#   TASK_SUB_URL  —— 任务 sub 的源 URL
+#   TASK_SUB2_URL —— 任务 sub2 的源 URL
+name: sync-sub
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '30 22 * * *'   # UTC 22:30 = 北京时间 06:30（首轮验证通过后取消注释）
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reachability probe (GitHub runner → sources)
+        env:
+          SUB_URL: ${{ secrets.TASK_SUB_URL }}
+          SUB2_URL: ${{ secrets.TASK_SUB2_URL }}
+        run: |
+          echo "sub : $(curl -s -o /dev/null -w '%{http_code} %{size_download}B' --max-time 30 -A 'clash-verge/1.7.7' "$SUB_URL" || echo BLOCKED)"
+          echo "sub2: $(curl -s -o /dev/null -w '%{http_code} %{size_download}B' --max-time 30 -A 'clash-verge/1.7.7' "$SUB2_URL" || echo BLOCKED)"
+
+      - name: Deploy pusher + config
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          SUB_URL: ${{ secrets.TASK_SUB_URL }}
+          SUB2_URL: ${{ secrets.TASK_SUB2_URL }}
+        run: |
+          set -e
+          D=/etc/sub_to_gist
+          sudo mkdir -p $D/tasks.d $D/cache.d $D/state.d $D/logs
+          sudo install -m 755 src/pusher.sh $D/pusher.sh
+          printf 'GIST_TOKEN="%s"\nGIST_DESCRIPTION_PREFIX="sub_to_gist"\n' "$GIST_TOKEN" | sudo tee $D/config.conf >/dev/null
+          printf 'TASK_NAME="sub"\nTASK_URL="%s"\nTASK_GIST_FILENAME="sub.txt"\nTASK_GIST_ID="f3191321746684c14d9dcddcad7bdd60"\n' "$SUB_URL"  | sudo tee $D/tasks.d/sub.conf  >/dev/null
+          printf 'TASK_NAME="sub2"\nTASK_URL="%s"\nTASK_GIST_FILENAME="sub2.txt"\nTASK_GIST_ID="f3191321746684c14d9dcddcad7bdd60"\n' "$SUB2_URL" | sudo tee $D/tasks.d/sub2.conf >/dev/null
+          sudo chmod 600 $D/config.conf $D/tasks.d/*.conf
+
+      - name: Run all tasks
+        run: sudo bash /etc/sub_to_gist/pusher.sh run-all
+
+      - name: Verify gist freshness
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          sleep 2
+          curl -s -H "Authorization: Bearer $GIST_TOKEN" https://api.github.com/gists/f3191321746684c14d9dcddcad7bdd60 \
+            | grep -o '"description": *"[^"]*"'
