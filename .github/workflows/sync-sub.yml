@@ -42,12 +42,12 @@ jobs:
           GIST_ID: ${{ secrets.GIST_ID }}
         run: |
           set -e
-          jq -n --rawfile m merged.txt --arg g "$GIST_ID" '{files:{"sub.txt":{content:$m}}}' > payload.json
+          jq -n --rawfile m merged.txt '{files:{"sub.txt":{content:$m}}}' > payload.json
           HTTP=$(curl -sS -o resp.json -w '%{http_code}' -X PATCH \
             -H "Authorization: Bearer $GIST_TOKEN" \
             -H 'Content-Type: application/json' \
             --data-binary @payload.json \
-            "https://api.github.com/gists/$g")
+            "https://api.github.com/gists/$GIST_ID")
           echo "gist PATCH HTTP=$HTTP"
           [ "$HTTP" = "200" ]
 
