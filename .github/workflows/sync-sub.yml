@@ -4,7 +4,7 @@ name: sync-sub
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 22 * * *'   # UTC 22:30 = 北京时间 06:30
+    - cron: '30 22 * * *'
 
 permissions:
   contents: read
@@ -20,13 +20,16 @@ jobs:
           S2: ${{ secrets.TASK_SUB2_URL }}
         run: |
           set -e
-          curl -sS --max-time 60  -A 'clash-verge/1.7.7' "$S1" -o s1.raw
-          curl -sS --max-time 60  -A 'clash-verge/1.7.7' "$S2" -o s2.raw
+          # UA=PassWall2: get base64/URI list (clash UA returns YAML - not usable here)
+          curl -sS --max-time 60  -A 'PassWall2' "$S1" -o s1.raw
+          curl -sS --max-time 60  -A 'PassWall2' "$S2" -o s2.raw
           for f in s1 s2; do
             if head -c 4 $f.raw | grep -q 'http'; then
               cp $f.raw $f.txt
+            elif base64 -d -i $f.raw > $f.txt 2>/dev/null && grep -q '://' $f.txt; then
+              : # decoded
             else
-              base64 -d -i $f.raw > $f.txt
+              cp $f.raw $f.txt
             fi
             echo "$f: $(grep -c '://' $f.txt || true) endpoints, $(wc -c < $f.txt) bytes"
           done
